@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Everything runs, and nothing here needs PyTorch: the golden files it
+      # produced offline are committed. The suite checks them three ways: the
+      # case file must be exactly what the code generates today (so the
+      # goldens cannot go stale silently), the interpreter and autodiff must
+      # match them within the budget in DESIGN.md, and
+      # golden/measurements.json -- the report's only data -- must be exactly
+      # what tools/measure.js recomputes, which takes about a minute.
+      - run: node --test

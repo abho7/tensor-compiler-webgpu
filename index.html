@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tensor-compiler-webgpu</title>
+<link rel="canonical" href="https://abho7.github.io/tensor-compiler-webgpu/">
+<meta name="description" content="A small tensor compiler written from scratch: a static-shape IR, reverse-mode autodiff as a graph transform, a float64 reference interpreter, and WGSL lowering to come. Milestone 1 report.">
+<style>
+  :root {
+    --ink: #16171b; --dim: #5c6068; --faint: #8b9099; --line: #e3e5e9; --bg: #fbfbfc;
+    --card: #ffffff; --accent: #3b5bdb; --good: #15803d; --warn: #b45309; --bad: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e7e9ee; --dim: #9aa1ab; --faint: #767c86; --line: #2a2d34; --bg: #131418;
+      --card: #191b20; --accent: #91a7ff; --good: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e7e9ee; --dim: #9aa1ab; --faint: #767c86; --line: #2a2d34; --bg: #131418;
+    --card: #191b20; --accent: #91a7ff; --good: #4ade80; --warn: #fbbf24; --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  main { max-width: 56rem; margin: 0 auto; padding: 3.5rem 1rem 6rem; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 0.5rem; letter-spacing: -0.015em; }
+  h2 { font-size: 0.82rem; margin: 3rem 0 0.8rem; color: var(--faint);
+       text-transform: uppercase; letter-spacing: 0.11em; font-weight: 500; }
+  h3 { font-size: 1rem; margin: 1.8rem 0 0.4rem; }
+  p { max-width: 46rem; }
+  .sub { color: var(--dim); margin-top: 0; }
+  a { color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 1.1rem 1.25rem; margin: 1rem 0; }
+  .lead { border-left: 3px solid var(--accent); }
+  .wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  th { text-align: left; font-weight: 500; color: var(--faint); padding: 0.3rem 1.2rem 0.5rem 0;
+       border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 0.32rem 1.2rem 0.32rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .claims td:first-child { color: var(--dim); }
+  .links { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; }
+  .links a { display: inline-block; padding: 0.4rem 0.8rem; border: 1px solid var(--line);
+             border-radius: 7px; text-decoration: none; background: var(--card); }
+  .links a b { color: var(--ink); }
+  .links a span { color: var(--faint); font-size: 0.82rem; }
+  .note { color: var(--dim); font-size: 0.86rem; }
+  footer { margin-top: 4rem; color: var(--faint); font-size: 0.82rem; }
+</style>
+<main>
+  <h1>A tensor compiler, written from scratch</h1>
+  <p class="sub">A static-shape tensor IR, reverse-mode autodiff as a graph-to-graph transform,
+  a float64 interpreter that defines what every program means, and, from milestone 2, lowering
+  to WGSL compute kernels so a small model can train in the browser. No ML framework in the
+  engine; PyTorch is used offline only, to write golden files.</p>
+
+  <div class="card lead">
+    <p style="margin:0"><b>The question:</b> when does kernel fusion pay off on an integrated
+    GPU, and when does it lose? That needs measured numbers, including the cases where fusion
+    is neutral or slower. Fused kernels are only worth timing once they are known to compute
+    the same thing as the unfused ones, so the first milestone is the reference everything
+    will be checked against. <b>This page reports milestone 1 of 4.</b></p>
+  </div>
+
+  <div class="links">
+    <a href="https://github.com/abho7/tensor-compiler-webgpu"><b>Source</b> <span>&mdash; GitHub</span></a>
+    <a href="https://github.com/abho7/tensor-compiler-webgpu/blob/main/DESIGN.md"><b>Design</b> <span>&mdash; ops, rules, error budget</span></a>
+    <a href="golden/measurements.json"><b>Data</b> <span>&mdash; every figure on this page</span></a>
+  </div>
+
+  <div id="report">Loading measurements&hellip;</div>
+
+  <footer>Every number on this page is read from <code>golden/measurements.json</code>, produced by
+  <code>node tools/measure.js</code>. Milestone 1 times nothing, so every figure is deterministic,
+  and CI recomputes the file and fails if it differs. Hover a figure for its full value.</footer>
+</main>
+
+<script type="module">
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+// Three significant figures for display; the exact value is in the tooltip.
+const sci = (v) => {
+  if (v === 0 || !Number.isFinite(v)) return String(v);
+  const a = Math.abs(v);
+  const shown = a < 1e-3 || a >= 1e4 ? v.toExponential(2) : v.toPrecision(3);
+  return `<span title="${v}">${shown}</span>`;
+};
+const n = (v) => Number(v).toLocaleString('en-US');
+const pct = (a, b) => `${(100 * a / b).toFixed(1)}%`;
+
+try {
+  const { m1 } = await (await fetch('golden/measurements.json')).json();
+  const f = m1.fuzz, c = m1.fuzzCentral, s = m1.secondOrder, t = m1.torch, B = m1.budgets;
+  const rules = m1.sabotage.rules;
+  const allCaught = rules.every((r) => r.caughtAfter !== null);
+  const [fail] = t.failures;
+  const centralFalse = c.failures.filter((x) => x.status === 'mismatch');
+
+  let html = `
+  <h2>What is actually established</h2>
+  <div class="wrap"><table class="claims">
+    <tr><th>claim</th><th>measured</th><th>checked against</th></tr>
+    <tr><td>Gradients are right on random programs</td>
+      <td class="n ${f.mismatch + f.error === 0 ? 'good' : 'bad'}">${n(f.agree)} of ${n(f.programs)} agree, ${f.mismatch + f.error} disagree</td>
+      <td>finite differences, worst ${sci(f.worst)} against a ${sci(B.finiteDifference)} budget</td></tr>
+    <tr><td>Second-order gradients are right</td>
+      <td class="n ${s.mismatch + s.error === 0 ? 'good' : 'bad'}">${n(s.agree)} of ${n(s.programs)} agree, ${s.mismatch + s.error} disagree</td>
+      <td>finite differences of the gradient graph, worst ${sci(s.worst)}</td></tr>
+    <tr><td>Values and gradients match PyTorch</td>
+      <td class="n ${t.pass === t.cases ? 'good' : 'warn'}">${t.pass} of ${t.cases} cases</td>
+      <td>PyTorch ${esc(t.torchVersion)} ${esc(t.dtype)} autograd; worst among passing cases ${sci(t.worstPassing.output)}
+        on values and ${sci(t.worstPassing.grad)} on gradients, budget ${sci(B.torch)}.
+        The failure is <a href="#against">below</a>.</td></tr>
+    <tr><td>Softmax and log-softmax built from primitives</td>
+      <td class="n good">worst ${sci(Math.max(t.worst.nativeOutput, t.worst.nativeGrad))}</td>
+      <td><code>torch.softmax</code> / <code>torch.log_softmax</code> themselves, including logits near 800,
+        where an unshifted softmax overflows float64</td></tr>
+    <tr><td>The fuzzer catches a wrong gradient rule</td>
+      <td class="n ${allCaught ? 'good' : 'bad'}">${rules.filter((r) => r.caughtAfter !== null).length} of ${rules.length} sabotaged rules caught</td>
+      <td>one deliberately wrong rule at a time; table below</td></tr>
+  </table></div>
+
+  <h2>Sabotage: does the fuzzer notice a wrong rule?</h2>
+  <p>Each gradient rule was replaced, one at a time, by a plausible wrong one, and the fuzzer
+  run from program 1 until it reported a disagreement. "Caught after" is the number of
+  programs that took. The rate is over the first ${n(m1.sabotage.ratePrograms)} programs, among
+  those that contain the op at all: a bug is only visible where the program exercises it,
+  and some are invisible on some shapes (a reshape is a transpose when a dimension is 1).</p>
+  <div class="wrap"><table>
+    <tr><th>rule</th><th>the injected bug</th><th>caught after</th><th>how</th><th>rate</th></tr>
+    ${rules.map((r) => `<tr><td><code>${esc(r.rule)}</code></td><td>${esc(r.bug)}</td>
+      <td class="n ${r.caughtAfter === null ? 'bad' : ''}">${r.caughtAfter === null ? `not in ${n(m1.sabotage.limit)}` : `${n(r.caughtAfter)} program${r.caughtAfter === 1 ? '' : 's'}`}</td>
+      <td>${r.how === 'error' ? 'structurally: autodiff refused' : r.how === 'mismatch' ? 'by value' : esc(r.how)}</td>
+      <td class="n">${r.caught} / ${r.containing} (${pct(r.caught, r.containing)})</td></tr>`).join('')}
+  </table></div>
+  <p class="note"><code>stopGradient</code>'s sabotage is caught structurally, not numerically:
+  letting the gradient through sends it into <code>max</code>, which has no rule and refuses.
+  That is the design working, but it means the fuzzer itself never measured that rule's values.</p>
+
+  <h3>And the PyTorch comparison, with a broken interpreter</h3>
+  <p>Finite differences differentiate whatever the interpreter computes, so a wrong forward
+  kernel is invisible to them. The golden files have to catch those. Counted only among cases
+  that pass with the honest kernels.</p>
+  <div class="wrap"><table>
+    <tr><th>kernel</th><th>the injected bug</th><th>cases failing</th><th>of them random</th><th>hand-built cases failing</th></tr>
+    ${t.kernelSabotage.map((k) => `<tr><td><code>${esc(k.op)}</code></td><td>${esc(k.bug)}</td>
+      <td class="n">${k.casesFailing} / ${k.cases}</td>
+      <td class="n ${k.randomFailing === 0 ? 'warn' : ''}">${k.randomFailing}</td>
+      <td>${k.names.map(esc).join(', ') || '&mdash;'}</td></tr>`).join('')}
+  </table></div>
+
+  <h2 id="against">What went against me</h2>
+  <h3>One golden case fails the budget as I wrote it</h3>
+  <p><code>${esc(fail?.name ?? 'none')}</code> computes <code>x0 / x0</code>, whose gradient is exactly
+  zero. Both this engine and PyTorch return rounding residue instead: largest absolute
+  difference ${sci(fail?.absolute?.gradDiff ?? 0)}, against a largest PyTorch value of
+  ${sci(fail?.absolute?.gradScale ?? 0)}. The budget, fixed before measuring, divides by the
+  latter, which scores this as a relative error of ${sci(fail?.errors?.grad ?? 0)}. The metric is at
+  fault, not the gradient, but the budget is not rewritten after the fact: the case stays
+  recorded as a failure, and the test pins it to exactly this so any other failure still breaks
+  the build.</p>
+
+  <h3>My first gradient checker raised a false alarm</h3>
+  <p>Plain central differences reported ${centralFalse.length} mismatch${centralFalse.length === 1 ? '' : 'es'} in
+  ${n(c.programs)} programs${centralFalse.length ? ` (program ${centralFalse.map((x) => x.seed).join(', ')}, ${esc(centralFalse[0].detail)}, a relative error of ${sci(centralFalse[0].worst)})` : ''}.
+  Shrinking the step showed autodiff was right and the estimate's truncation error was not.
+  The checker now uses Richardson extrapolation, and its worst error over the same programs is
+  ${sci(f.worst)}. The budget stayed where it was.</p>
+
+  <h3>The random cases never exercise some bugs</h3>
+  <p>A transpose kernel that indexed with the inverse permutation failed
+  ${t.kernelSabotage.find((k) => k.op === 'transpose')?.randomFailing ?? '?'} of the random golden cases:
+  it only shows on a permutation that is not its own inverse, which needs rank 3. A hand-built
+  case was added to cover it. And an <code>exp</code> that is uniformly off in relative terms passes
+  every softmax case, because the error cancels in the ratio.</p>
+
+  <h3>Not every program could be checked</h3>
+  <p>${n(f.rejected)} of ${n(f.programs)} programs (${pct(f.rejected, f.programs)}) found no point in 20 draws
+  where finite differences mean anything: a value past 10<sup>4</sup>, a log or a denominator near zero, or a
+  perturbation crossing a relu's kink. They were skipped, not passed, and ${n(f.rejectedDraws)} rejected
+  draws were spent across all programs.</p>
+
+  <h2>Coverage</h2>
+  <p>Programs containing each op, among the ${n(f.agree)} that were checked.</p>
+  <div class="wrap"><table>
+    <tr><th>op</th><th>programs</th></tr>
+    ${Object.entries(f.opsChecked).sort((a, b) => b[1] - a[1]).map(([op, k]) => `<tr><td><code>${esc(op)}</code></td><td class="n">${n(k)}</td></tr>`).join('')}
+  </table></div>
+
+  <h2>Timings</h2>
+  <p>None yet. Milestone 1 is a CPU reference and is checked, not timed. From milestone 2 on,
+  every timing on this page shows the Windows power mode it was taken under, and only
+  measurements from one session are compared, because on this laptop the power plan alone has
+  moved a CPU baseline several-fold (measured in
+  <a href="https://abho7.github.io/llm-inference-webgpu/">llm-inference-webgpu</a>).</p>
+
+  <h2>What comes next</h2>
+  <div class="wrap"><table>
+    <tr><th>milestone</th><th>what</th><th>status</th></tr>
+    <tr><td>1</td><td>tensor IR, autodiff, float64 reference, fuzzed and checked against PyTorch</td><td class="good">done</td></tr>
+    <tr><td>2</td><td>lowering to WGSL kernels, fuzzed against this interpreter under the float32 budget in DESIGN.md</td><td>not started</td></tr>
+    <tr><td>3</td><td>train an MLP, then a small transformer, in the browser; loss curves against PyTorch</td><td>not started</td></tr>
+    <tr><td>4</td><td>fusion and autotuning, timed against the hand-written kernels of llm-inference-webgpu</td><td>not started</td></tr>
+  </table></div>`;
+
+  document.getElementById('report').innerHTML = html;
+} catch (error) {
+  document.getElementById('report').innerHTML = `<p class="bad">Could not load the measurements: ${esc(error.message)}</p>`;
+}
+</script>
