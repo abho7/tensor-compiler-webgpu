@@ -1,0 +1,14 @@
+{
+  "name": "tensor-compiler-webgpu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "A small tensor compiler: a static-shape IR, reverse-mode autodiff as a graph transform, a float64 reference interpreter, and (from milestone 2) lowering to WGSL compute kernels.",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test",
+    "measure": "node tools/measure.js",
+    "serve": "node tools/serve.js"
+  }
+}
