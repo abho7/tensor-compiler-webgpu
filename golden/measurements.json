@@ -1,0 +1,370 @@
+{
+ "m1": {
+  "producedBy": "node tools/measure.js",
+  "budgets": {
+   "finiteDifference": 0.000001,
+   "torch": 1e-12
+  },
+  "generatedOps": [
+   "add",
+   "sub",
+   "mul",
+   "div",
+   "neg",
+   "exp",
+   "log",
+   "relu",
+   "tanh",
+   "matmul",
+   "sum",
+   "broadcast",
+   "reshape",
+   "transpose",
+   "softmax",
+   "logSoftmax"
+  ],
+  "fuzz": {
+   "method": "richardson",
+   "programs": 3000,
+   "agree": 2886,
+   "mismatch": 0,
+   "error": 0,
+   "rejected": 114,
+   "rejectedDraws": 2873,
+   "worst": 5.595463359320263e-8,
+   "worstSeed": 2639,
+   "failures": [],
+   "opsChecked": {
+    "input": 2886,
+    "reshape": 1231,
+    "matmul": 1369,
+    "sub": 1894,
+    "relu": 1149,
+    "mul": 1613,
+    "const": 1676,
+    "broadcast": 2119,
+    "add": 1620,
+    "log": 1249,
+    "transpose": 604,
+    "sum": 1821,
+    "max": 1271,
+    "stopGradient": 1271,
+    "exp": 1879,
+    "div": 1561,
+    "tanh": 784,
+    "neg": 430
+   }
+  },
+  "fuzzCentral": {
+   "method": "central",
+   "programs": 3000,
+   "agree": 2885,
+   "mismatch": 1,
+   "error": 0,
+   "rejected": 114,
+   "rejectedDraws": 2872,
+   "worst": 4.7550368657491574e-7,
+   "worstSeed": 125,
+   "failures": [
+    {
+     "seed": 496,
+     "status": "mismatch",
+     "worst": 0.0000014299918105328144,
+     "detail": "x1[2]: autodiff -24679.666776935042, finite difference -24679.702068706887"
+    }
+   ],
+   "opsChecked": {
+    "input": 2885,
+    "reshape": 1231,
+    "matmul": 1369,
+    "sub": 1894,
+    "relu": 1148,
+    "mul": 1613,
+    "const": 1675,
+    "broadcast": 2118,
+    "add": 1620,
+    "log": 1249,
+    "transpose": 604,
+    "sum": 1820,
+    "max": 1271,
+    "stopGradient": 1271,
+    "exp": 1878,
+    "div": 1560,
+    "tanh": 784,
+    "neg": 430
+   }
+  },
+  "secondOrder": {
+   "programs": 500,
+   "agree": 476,
+   "mismatch": 0,
+   "error": 0,
+   "rejected": 24,
+   "rejectedDraws": 574,
+   "worst": 1.1987930249288054e-8,
+   "worstSeed": 127,
+   "failures": [],
+   "opsChecked": {
+    "input": 476,
+    "reshape": 202,
+    "matmul": 238,
+    "sub": 310,
+    "relu": 187,
+    "mul": 263,
+    "const": 267,
+    "broadcast": 359,
+    "add": 258,
+    "log": 183,
+    "transpose": 101,
+    "sum": 303,
+    "max": 207,
+    "stopGradient": 207,
+    "exp": 317,
+    "div": 258,
+    "tanh": 132,
+    "neg": 73
+   }
+  },
+  "sabotage": {
+   "limit": 3000,
+   "ratePrograms": 1000,
+   "rules": [
+    {
+     "rule": "add",
+     "bug": "second operand receives -g",
+     "caughtAfter": 3,
+     "how": "mismatch",
+     "detail": "x2[0]: autodiff -0.722397446166724, finite difference 0.722397446167866",
+     "containing": 573,
+     "caught": 140
+    },
+    {
+     "rule": "sub",
+     "bug": "second operand receives +g (sign dropped)",
+     "caughtAfter": 2,
+     "how": "mismatch",
+     "detail": "x1[0]: autodiff 1.2214176439059277, finite difference 0",
+     "containing": 655,
+     "caught": 227
+    },
+    {
+     "rule": "mul",
+     "bug": "each operand multiplied by itself instead of the other",
+     "caughtAfter": 11,
+     "how": "mismatch",
+     "detail": "x1[5]: autodiff 1.1161385264118113, finite difference -0.31930238595379024",
+     "containing": 531,
+     "caught": 136
+    },
+    {
+     "rule": "div",
+     "bug": "denominator gradient missing its minus sign",
+     "caughtAfter": 9,
+     "how": "mismatch",
+     "detail": "x0[1]: autodiff -1.9156160977095238, finite difference 0",
+     "containing": 546,
+     "caught": 234
+    },
+    {
+     "rule": "neg",
+     "bug": "passes g through unnegated",
+     "caughtAfter": 42,
+     "how": "mismatch",
+     "detail": "x0[2]: autodiff 1.9222648284890056, finite difference -1.9222648285261623",
+     "containing": 141,
+     "caught": 45
+    },
+    {
+     "rule": "exp",
+     "bug": "multiplies by the input instead of the result",
+     "caughtAfter": 7,
+     "how": "mismatch",
+     "detail": "x1[3]: autodiff 1.3129832257357041, finite difference -0.22521895060537792",
+     "containing": 649,
+     "caught": 308
+    },
+    {
+     "rule": "log",
+     "bug": "divides by the result instead of the input",
+     "caughtAfter": 1,
+     "how": "mismatch",
+     "detail": "x2[0]: autodiff 1.0570135714860078, finite difference 0.37202510225788205",
+     "containing": 417,
+     "caught": 186
+    },
+    {
+     "rule": "relu",
+     "bug": "no mask: passes g through everywhere",
+     "caughtAfter": 11,
+     "how": "mismatch",
+     "detail": "x1[0]: autodiff 1.0120833770351965, finite difference 0",
+     "containing": 391,
+     "caught": 124
+    },
+    {
+     "rule": "tanh",
+     "bug": "1 - y instead of 1 - y²",
+     "caughtAfter": 4,
+     "how": "mismatch",
+     "detail": "x4[4]: autodiff 0.7681422204335618, finite difference 1.2706727888138616",
+     "containing": 291,
+     "caught": 127
+    },
+    {
+     "rule": "matmul",
+     "bug": "aᵀ formed by reshape instead of transpose",
+     "caughtAfter": 5,
+     "how": "mismatch",
+     "detail": "x5[4]: autodiff -0.23254215943713508, finite difference -1.6683352928481552",
+     "containing": 492,
+     "caught": 69
+    },
+    {
+     "rule": "sum",
+     "bug": "mean instead of sum: g divided by the axis length",
+     "caughtAfter": 7,
+     "how": "mismatch",
+     "detail": "x1[3]: autodiff -0.05630473765086081, finite difference -0.22521895060537792",
+     "containing": 620,
+     "caught": 216
+    },
+    {
+     "rule": "broadcast",
+     "bug": "mean instead of sum over the expanded axes",
+     "caughtAfter": 3,
+     "how": "mismatch",
+     "detail": "x4[1]: autodiff -0.24011498503386974, finite difference -0.4802299700699952",
+     "containing": 745,
+     "caught": 311
+    },
+    {
+     "rule": "reshape",
+     "bug": "last two axes swapped before reshaping back (a layout mix-up)",
+     "caughtAfter": 124,
+     "how": "mismatch",
+     "detail": "x2[5]: autodiff 0.4355527590960264, finite difference -0.4920640938562333",
+     "containing": 419,
+     "caught": 15
+    },
+    {
+     "rule": "transpose",
+     "bug": "applies perm again instead of its inverse",
+     "caughtAfter": 97,
+     "how": "mismatch",
+     "detail": "x1[1]: autodiff 2.371426282776578, finite difference -0.1735167336332684",
+     "containing": 224,
+     "caught": 12
+    },
+    {
+     "rule": "stopGradient",
+     "bug": "lets the gradient through, like identity",
+     "caughtAfter": 2,
+     "how": "error",
+     "detail": "grad: max has no gradient; wrap it in stopGradient where its gradient is zero (as softmax does)",
+     "containing": 423,
+     "caught": 229
+    }
+   ]
+  },
+  "torch": {
+   "torchVersion": "2.14.1+cpu",
+   "dtype": "float64",
+   "cases": 72,
+   "pass": 71,
+   "kinds": {
+    "random": {
+     "cases": 60,
+     "pass": 59
+    },
+    "composite": {
+     "cases": 9,
+     "pass": 9
+    },
+    "model": {
+     "cases": 3,
+     "pass": 3
+    }
+   },
+   "worst": {
+    "output": 3.0594436030831317e-16,
+    "grad": 2,
+    "nativeOutput": 1.5773510781528036e-16,
+    "nativeGrad": 5.009721238625414e-16
+   },
+   "worstPassing": {
+    "output": 3.0594436030831317e-16,
+    "grad": 8.506003704405326e-16
+   },
+   "failures": [
+    {
+     "name": "random-9",
+     "errors": {
+      "output": 0,
+      "grad": 2
+     },
+     "absolute": {
+      "gradDiff": 4.440892098500626e-16,
+      "gradScale": 2.220446049250313e-16
+     },
+     "detail": null
+    }
+   ],
+   "kernelSabotage": [
+    {
+     "op": "tanh",
+     "bug": "tanh computed as x / (1 + |x|)",
+     "casesFailing": 9,
+     "cases": 72,
+     "randomFailing": 8,
+     "names": [
+      "transpose-cycles"
+     ]
+    },
+    {
+     "op": "transpose",
+     "bug": "indexes with the inverse permutation",
+     "casesFailing": 1,
+     "cases": 72,
+     "randomFailing": 0,
+     "names": [
+      "transpose-cycles"
+     ]
+    },
+    {
+     "op": "sum",
+     "bug": "drops the last term of every reduction",
+     "casesFailing": 36,
+     "cases": 72,
+     "randomFailing": 25,
+     "names": [
+      "softmax-5-axis0",
+      "softmax-3x4-axis1",
+      "softmax-3x4-axis0",
+      "softmax-2x3x4-axis1",
+      "logSoftmax-5-axis0",
+      "logSoftmax-3x4-axis1",
+      "logSoftmax-2x3x4-axis2",
+      "softmax-2x6-axis1-large",
+      "logSoftmax-2x6-axis1-large",
+      "mlp-nll",
+      "attention"
+     ]
+    },
+    {
+     "op": "exp",
+     "bug": "exp with a relative error of 1e-9, far below what finite differences resolve",
+     "casesFailing": 23,
+     "cases": 72,
+     "randomFailing": 18,
+     "names": [
+      "logSoftmax-5-axis0",
+      "logSoftmax-3x4-axis1",
+      "logSoftmax-2x3x4-axis2",
+      "logSoftmax-2x6-axis1-large",
+      "mlp-nll"
+     ]
+    }
+   ]
+  }
+ }
+}
