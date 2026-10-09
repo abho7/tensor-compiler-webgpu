@@ -122,6 +122,8 @@ injecting a real bug and confirming that the checker reports it.
    input or a near-tie in `max` within δ of 0, a `log` argument or a `div`
    denominator within δ of 0, any non-finite value) are rejected and the inputs
    redrawn, and the number of rejections is reported rather than hidden.
+   (Amended: see [Amendments](#amendments-after-measurement) for how kinks and
+   near-ties are actually handled, and the change to the difference formula.)
 2. **PyTorch golden files.** A fixed set of seeded random graphs, plus
    hand-built softmax, log-softmax, MLP and attention-shaped graphs, is
    exported as JSON. `oracle/torch_golden.py` rebuilds each one op for op in
@@ -181,6 +183,33 @@ specification's stated accuracy for each operation.
 
 M3 (training loss curves against PyTorch float32) will have its tolerance set
 and committed before its first measurement, from these per-op bounds.
+
+## Amendments after measurement
+
+Recorded rather than edited in place, so the text above still shows what was
+fixed before measuring. No tolerance has changed.
+
+1. **The finite-difference formula** (2026-10-09). Plain central differences
+   at `h = 1e-5 · max(1, abs(x))` raised a false alarm: near a pole their
+   truncation error alone was 1.4e-6 relative, against an autodiff gradient
+   that shrinking `h` showed to be right. The checker now uses Richardson
+   extrapolation, `(4·D(h/2) - D(h)) / 3`, which cancels the `h²` term. The
+   1e-6 budget is unchanged. The old method stays selectable and its false
+   alarms are part of the record.
+2. **Kinks and `max`.** Rather than a margin δ around relu inputs, the checker
+   rejects a point if any perturbed evaluation changes the sign of any relu or
+   step input, which is exact. `max` never needs a margin: the generator only
+   emits it inside softmax and log-softmax, which are smooth across a tie in
+   their maximum. A bare `stopGradient` is deliberately not the derivative,
+   so the generator never emits one outside those composites.
+3. **A blind spot in the PyTorch metric.** Normalising by `max abs(torch)` fails
+   when the true value is exactly zero and both sides return rounding residue:
+   `x / x` has gradient 0, and ours and PyTorch's are different values around
+   1e-16, a "relative error" of 2. The case (`random-9`) is recorded as failing
+   the M1 budget as stated, with its absolute figures. The M2 reduction and
+   matmul budgets scale by the sum of the terms' absolute values rather than by
+   the result, which should avoid this; whether the composed whole-program
+   budget does is untested and is to be settled before M2 measures anything.
 
 ## Fusion (milestone 4, criteria fixed in advance)
 
