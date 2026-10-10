@@ -187,7 +187,10 @@ and committed before its first measurement, from these per-op bounds.
 ## Amendments after measurement
 
 Recorded rather than edited in place, so the text above still shows what was
-fixed before measuring. No tolerance has changed.
+fixed before measuring. One metric has been replaced, and it was replaced
+because of a result: random-9's failure under v1 (amendment 3) is why v2
+(amendment 4) exists. v1's verdicts stay in the record beside v2's, and v2's
+constants were set before any case was scored under it.
 
 1. **The finite-difference formula** (2026-10-09). Plain central differences
    at `h = 1e-5 · max(1, abs(x))` raised a false alarm: near a pole their
@@ -210,6 +213,71 @@ fixed before measuring. No tolerance has changed.
    matmul budgets scale by the sum of the terms' absolute values rather than by
    the result, which should avoid this; whether the composed whole-program
    budget does is untested and is to be settled before M2 measures anything.
+
+### Milestone 1.5 (2026-10-09), before any GPU measurement exists
+
+4. **Metric v2 for whole-tensor comparisons.** Decided now, while no GPU
+   result exists to tune it against. Per element:
+
+   ```
+   abs(ours - ref) <= atol + rtol · abs(ref)
+   atol = atolScale · max(1, max abs(ref) over the tensor)
+   ```
+
+   with `rtol = atolScale = 1e-12` for the CPU (float64) against PyTorch
+   (float64). The constants are the ones the M1.5 brief proposed, adopted before
+   any case was scored under v2. A tensor's score is the largest ratio of the
+   left side to the right; it passes at <= 1.
+
+   Why: v1 divided by the largest reference value, so a tensor whose true value
+   is exactly zero, computed by both sides as rounding residue, was judged
+   against its own residue. v2's `atol` is floored at `atolScale · 1`, so
+   residue around an exact zero is measured against a fixed absolute scale,
+   and `rtol` keeps the large entries relative.
+
+   What it gives up, stated before measuring: because `atol` is set by the
+   tensor's largest entry, it is never smaller than `rtol · abs(ref)` for any
+   entry, so v2 is never more than twice as loose as `max abs diff <=
+   1e-12 · max(1, max abs ref)`. A relative error ε in one entry of magnitude r
+   escapes when `ε · r <= atol + rtol · r`: for ε = 1e-4 that is entries below
+   about 1e-8 · max(1, largest entry). Small entries beside large ones, and
+   tensors whose values are all far below 1, are checked only absolutely.
+   The (1 + 1e-4) injection measures what this misses in practice.
+
+   v1 stays in the code and in the record: every case is scored under both, and
+   the M1 figures are still v1's. M2 uses the same form for whole-tensor
+   checks; its float32 constants are still to be fixed, from the per-op table
+   above, before M2's first measurement.
+
+5. **Generator v2.** The M1 generator (`random-graph-v1.js`) is frozen so M1's
+   record and golden cases reproduce. v2 builds programs valid by
+   construction: an interval for every value, sound for inputs in [-2, 2], and
+   log, div and exp only where the interval proves them safe. v1's 3.8% of
+   programs without a usable point were almost all `log` of a possibly
+   negative value (94 of 114) or a denominator that could reach zero (18).
+   v2 also adds larger and non-square shapes, size-1 dimensions, ranks up to 4,
+   and targeted programs for matmul, transpose, reshape, broadcast and sum.
+
+6. **Detection rate**, per sabotaged rule: the fraction of corpus programs
+   containing the op that catch the bug. The v2 generator was revised twice
+   after seeing rates, and both revisions are recorded here because they are
+   exactly the kind of tuning a reader should know about:
+   - First v2 (larger shapes, valid by construction): matmul, transpose and
+     reshape still caught at 26.6%, 23.4% and 23.7% of a 1,000-program mixed
+     corpus. Cause: v1 and first-v2 programs had a single output, the last
+     value, and most earlier ops were dead code, which no checker can catch a
+     bug in. Fix: every unconsumed value is an output.
+   - Second: 43.1%, 42.0%, 39.2%. Cause: degenerate shapes (an inner
+     dimension of 1, where a reshape and a transpose coincide; a 3-cycle over a
+     size-1 axis, which moves data like a swap) and a matmul right operand that
+     was a constant. Fix, in targeted programs only: dimensions >= 2, an input
+     as matmul's right operand, permutations favouring non-involutions.
+   The general generator keeps size-1 dims and constants on purpose, so its
+   rate is the less biased number. The targeted builders were shaped after
+   seeing which shapes hid these known bugs, so their rate measures reach for
+   these bugs, not for unknown ones. The corpus mix (half general, half
+   targeted) was fixed before the final measurement and not changed to reach
+   the 50% target.
 
 ## Fusion (milestone 4, criteria fixed in advance)
 

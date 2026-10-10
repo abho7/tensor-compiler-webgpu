@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { randomProgram } from '../src/testing/random-graph.js';
+import { randomProgram } from '../src/testing/random-graph-v1.js';
 import { checkGradients, secondOrder } from '../src/testing/gradcheck.js';
 import { RULE_SABOTAGE, sabotagedRules } from '../src/testing/sabotage.js';
 import { RULES } from '../src/autodiff.js';

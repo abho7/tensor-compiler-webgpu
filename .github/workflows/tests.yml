@@ -20,5 +20,5 @@ jobs:
       # goldens cannot go stale silently), the interpreter and autodiff must
       # match them within the budget in DESIGN.md, and
       # golden/measurements.json -- the report's only data -- must be exactly
-      # what tools/measure.js recomputes, which takes about a minute.
+      # what tools/measure.js recomputes, which takes a few minutes.
       - run: node --test

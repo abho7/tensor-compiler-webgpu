@@ -3,7 +3,7 @@
 // nothing is timed), so CI recomputes it and fails if the committed
 // golden/measurements.json differs from what the code produces now.
 
-import { randomProgram, GENERATED } from './random-graph.js';
+import { randomProgram, GENERATED } from './random-graph-v1.js';
 import { checkGradients, secondOrder, TOLERANCE } from './gradcheck.js';
 import { RULE_SABOTAGE, sabotagedRules, KERNEL_SABOTAGE, sabotagedKernels } from './sabotage.js';
 import { compareAll, GOLDEN_TOLERANCE } from './golden.js';
@@ -58,7 +58,10 @@ function sabotage() {
   });
 }
 
-export function measureM1({ cases, golden }) {
+export function measureM1({ cases: allCases, golden }) {
+  // The milestone 1 record covers the milestone 1 case set only, so cases
+  // added later cannot change it.
+  const cases = allCases.filter((c) => (c.set ?? 'm1') === 'm1');
   const fuzz = campaign(FUZZ_PROGRAMS, (p, seed) => checkGradients(p, { seed }));
   const central = campaign(FUZZ_PROGRAMS, (p, seed) => checkGradients(p, { seed, method: 'central' }));
   const second = campaign(SECOND_ORDER_PROGRAMS, (p, seed) => checkGradients(secondOrder(p), { seed }));

@@ -35,7 +35,7 @@ const LIMIT = 1e4;
 function pointIsUsable(graph, inputs, kernels) {
   let ok = true;
   const signs = [];
-  evaluate(graph, inputs, {
+  const values = evaluate(graph, inputs, {
     kernels,
     onNode(node, args, value) {
       for (const v of value) if (!Number.isFinite(v) || Math.abs(v) > LIMIT) ok = false;
@@ -44,7 +44,7 @@ function pointIsUsable(graph, inputs, kernels) {
       if (node.op === 'relu' || node.op === 'step') for (const v of args[0]) signs.push(v > 0 ? 1 : 0);
     },
   });
-  return { ok, signs: signs.join('') };
+  return { ok, signs: signs.join(''), values };
 }
 
 /**
@@ -84,8 +84,9 @@ export function checkGradients(program, { seed = 1, rules = RULES, kernels = KER
     }
     if (!base.ok) { rejections++; continue; }
 
-    const loss = (point) => {
-      const values = evaluate(graph, point, { kernels });
+    // L from an already-evaluated point: each perturbed point is evaluated once,
+    // for its usability and its loss together.
+    const loss = (values) => {
       let total = 0;
       outputs.forEach((id, i) => { for (let j = 0; j < w[i].length; j++) total += w[i][j] * values[id][j]; });
       return total;
@@ -106,7 +107,7 @@ export function checkGradients(program, { seed = 1, rules = RULES, kernels = KER
           const p = pointIsUsable(graph, plus, kernels);
           const m = pointIsUsable(graph, minus, kernels);
           if (!p.ok || !m.ok || p.signs !== base.signs || m.signs !== base.signs) return null;
-          return (loss(plus) - loss(minus)) / (2 * step);
+          return (loss(p.values) - loss(m.values)) / (2 * step);
         };
         const d1 = central(h);
         const d2 = method === 'richardson' ? central(h / 2) : 0;
