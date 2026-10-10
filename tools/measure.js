@@ -6,12 +6,14 @@
 // committed file is stale.
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { measureM1 } from '../src/testing/measure.js';
+import { measureAll } from '../src/testing/measure-all.js';
 
 const read = (p) => JSON.parse(readFileSync(new URL(p, import.meta.url)));
-const result = measureM1({ cases: read('../golden/cases.json').cases, golden: read('../golden/torch.json') });
+const result = measureAll({ cases: read('../golden/cases.json').cases, golden: read('../golden/torch.json') });
 writeFileSync(new URL('../golden/measurements.json', import.meta.url), JSON.stringify(result, null, 1) + '\n');
-const m = result.m1;
-console.log(`fuzz ${m.fuzz.agree}/${m.fuzz.programs} agree, worst ${m.fuzz.worst}; central mismatches ${m.fuzzCentral.mismatch}`);
-console.log(`second order ${m.secondOrder.agree}/${m.secondOrder.programs}; torch ${m.torch.pass}/${m.torch.cases}`);
-for (const s of m.sabotage.rules) console.log(`  ${s.rule.padEnd(12)} after ${s.caughtAfter} (${s.how}), ${s.caught}/${s.containing}`);
+const { m1, m1_5: m } = result;
+console.log(`M1: fuzz ${m1.fuzz.agree}/${m1.fuzz.programs}; torch ${m1.torch.pass}/${m1.torch.cases}`);
+console.log(`M1.5: skips ${m.skips.before.rejected}/${m.skips.before.programs} -> ${m.skips.after.rejected}/${m.skips.after.programs}; fuzz ${m.fuzz.agree} agree, worst ${m.fuzz.worst}`);
+console.log(`  metric: v1 ${m.metric.summary.all.v1Pass}, v2 ${m.metric.summary.all.v2Pass} of ${m.metric.summary.all.cases}`);
+const pc = (x) => `${x.caught}/${x.containing} (${(100 * x.caught / x.containing).toFixed(1)}%)`;
+for (const r of m.detection.rules) console.log(`  ${r.rule.padEnd(12)} before ${pc(r.before)}  general ${pc(r.after.general)}  targeted ${pc(r.after.targeted)}  corpus ${pc(r.after.corpus)}`);

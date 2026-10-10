@@ -8,7 +8,8 @@
 import { Graph } from '../ir/graph.js';
 import { size } from '../ir/shapes.js';
 import { evaluate } from '../interp.js';
-import { randomProgram } from './random-graph.js';
+import { randomProgram } from './random-graph-v1.js';
+import { randomProgram as randomProgramV2, TARGETS } from './random-graph.js';
 import { Rng } from './rng.js';
 
 const RANDOM_CASES = 60;
@@ -108,6 +109,21 @@ export function buildCases() {
     const back = g.transpose(t, [1, 2, 0]);
     const out = g.matmul(back, w);
     cases.push(pack('transpose-cycles', 'model', g, [out], draw(rng, g, [out])));
+  }
+
+  // Milestone 1.5: cases from the v2 generator (larger, non-square shapes,
+  // size-1 dims, rank 3 and 4, every op live), tagged so the M1 set and its
+  // record are untouched.
+  const v2 = [
+    ...Array.from({ length: 25 }, (_, i) => [`v2-random-${i + 1}`, randomProgramV2(i + 1)]),
+    ...TARGETS.flatMap((op) => [1, 2, 3].map((i) => [`v2-${op}-${i}`, randomProgramV2(i, { focus: op })])),
+  ];
+  for (const [name, p] of v2) {
+    const r = new Rng(p.seed * 7 + name.length);
+    for (let t = 0; t < 20; t++) {
+      const point = draw(r, p.graph, p.outputs);
+      if (usable(p.graph, point.inputs)) { cases.push({ ...pack(name, p.focus ? 'targeted' : 'random', p.graph, p.outputs, point), set: 'm1.5' }); break; }
+    }
   }
 
   return cases;

@@ -62,7 +62,9 @@
     GPU, and when does it lose? That needs measured numbers, including the cases where fusion
     is neutral or slower. Fused kernels are only worth timing once they are known to compute
     the same thing as the unfused ones, so the first milestone is the reference everything
-    will be checked against. <b>This page reports milestone 1 of 4.</b></p>
+    will be checked against. <b>This page reports milestone 1 of 4, and the hardening pass
+    after it (1.5).</b> Nothing from milestone 1 has been removed: its record, failures and
+    false alarm included, is further down, unchanged.</p>
   </div>
 
   <div class="links">
@@ -74,7 +76,7 @@
   <div id="report">Loading measurements&hellip;</div>
 
   <footer>Every number on this page is read from <code>golden/measurements.json</code>, produced by
-  <code>node tools/measure.js</code>. Milestone 1 times nothing, so every figure is deterministic,
+  <code>node tools/measure.js</code>. Nothing so far is timed, so every figure is deterministic,
   and CI recomputes the file and fails if it differs. Hover a figure for its full value.</footer>
 </main>
 
@@ -91,14 +93,116 @@ const n = (v) => Number(v).toLocaleString('en-US');
 const pct = (a, b) => `${(100 * a / b).toFixed(1)}%`;
 
 try {
-  const { m1 } = await (await fetch('golden/measurements.json')).json();
+  const { m1, m1_5: H } = await (await fetch('golden/measurements.json')).json();
   const f = m1.fuzz, c = m1.fuzzCentral, s = m1.secondOrder, t = m1.torch, B = m1.budgets;
   const rules = m1.sabotage.rules;
   const allCaught = rules.every((r) => r.caughtAfter !== null);
   const [fail] = t.failures;
   const centralFalse = c.failures.filter((x) => x.status === 'mismatch');
 
+  const rate = (x) => (x.containing ? x.caught / x.containing : 0);
+  const rateCell = (x, cls = '') => `<td class="n ${cls}">${pct(x.caught, x.containing)} <span class="note">(${n(x.caught)} / ${n(x.containing)})</span></td>`;
+  const M = H.metric, D = H.detection, F2 = H.fuzz, S2 = H.secondOrder;
+  const targeted = D.rules.filter((r) => ['matmul', 'transpose', 'reshape'].includes(r.rule));
+  const met = (x) => rate(x) > D.target;
+  const inj = `1 + ${sci(M.injection.factor - 1)}`;
+  const perRuleMissed = M.injection.perRule.flatMap((r) => r.missed.map((m) => ({ op: r.op, ...m })));
+  const missedNames = [...new Set(perRuleMissed.map((m) => m.name))];
+  const setName = (k) => (k === 'all' ? 'all' : k === 'm1' ? 'milestone 1' : `milestone ${k.slice(1)} (v2 generator)`);
+  const short = targeted.filter((r) => !met(r.after.corpus));
+
   let html = `
+  <h2>Milestone 1.5: hardening, before any GPU work</h2>
+  <div class="wrap"><table class="claims">
+    <tr><th>change</th><th>before</th><th>after</th></tr>
+    <tr><td>Programs with no point where finite differences mean anything</td>
+      <td class="n warn">${n(H.skips.before.rejected)} of ${n(H.skips.before.programs)} (${pct(H.skips.before.rejected, H.skips.before.programs)})</td>
+      <td class="n ${H.skips.after.rejected === 0 ? 'good' : 'warn'}">${n(H.skips.after.rejected)} of ${n(H.skips.after.programs)} (${pct(H.skips.after.rejected, H.skips.after.programs)})</td></tr>
+    <tr><td>PyTorch cases passing the comparison metric</td>
+      <td class="n warn">v1: ${M.summary.all.v1Pass} of ${M.summary.all.cases}</td>
+      <td class="n ${M.summary.all.v2Pass === M.summary.all.cases ? 'good' : 'warn'}">v2: ${M.summary.all.v2Pass} of ${M.summary.all.cases}</td></tr>
+    ${targeted.map((r) => `<tr><td>Programs containing <code>${esc(r.rule)}</code> that catch its sabotage</td>
+      ${rateCell(r.before, 'warn')}${rateCell(r.after.corpus, met(r.after.corpus) ? 'good' : 'bad')}</tr>`).join('')}
+  </table></div>
+
+  <h3>Metric v2, decided before any GPU measurement</h3>
+  <p>v1 divided each tensor's largest difference by its largest PyTorch value, so a true zero
+  computed as rounding residue on both sides was judged against its own residue. v2, per
+  element: <code>${esc(M.formula)}</code>, with rtol = ${sci(M.rtol)} and atolScale = ${sci(M.atolScale)};
+  a tensor passes when its worst ratio is at most 1. Every case is scored under both.</p>
+  <div class="wrap"><table>
+    <tr><th>case set</th><th>cases</th><th>v1 passes</th><th>v2 passes</th><th>worst v2 ratio</th></tr>
+    ${Object.entries(M.summary).map(([k, x]) => `<tr><td>${esc(setName(k))}</td>
+      <td class="n">${x.cases}</td><td class="n ${x.v1Pass === x.cases ? '' : 'warn'}">${x.v1Pass}</td>
+      <td class="n ${x.v2Pass === x.cases ? 'good' : 'bad'}">${x.v2Pass}</td><td class="n">${sci(x.worstV2)}</td></tr>`).join('')}
+  </table></div>
+  <p><b>Is v2 too loose?</b> Every gradient of every case multiplied by ${inj}: v2 flags
+  ${M.injection.allGradients.flagged} of the ${M.injection.allGradients.affected} cases whose gradient changed.
+  ${M.injection.allGradients.missed.map((m) => `It misses <code>${esc(m.name)}</code>, whose true gradient is exactly zero: the
+  change is ${sci(m.change)} of rounding residue, against a largest value of ${sci(m.gradScale)}.`).join(' ')}
+  Then one rule at a time, its contribution multiplied by ${inj}:</p>
+  <div class="wrap"><table>
+    <tr><th>rule</th><th>cases it changes</th><th>v2 flags</th></tr>
+    ${M.injection.perRule.map((r) => `<tr><td><code>${esc(r.op)}</code></td><td class="n">${r.affected}</td>
+      <td class="n ${r.flagged === r.affected ? 'good' : 'warn'}">${r.flagged}</td></tr>`).join('')}
+  </table></div>
+  <p class="note">${perRuleMissed.length
+    ? `Every miss is ${missedNames.map((x) => `<code>${esc(x)}</code>`).join(', ')}, where the change is at most
+      ${sci(Math.max(...perRuleMissed.map((m) => m.change)))}: residue around an exact zero, not an error a metric should flag.`
+    : 'No misses.'}
+  What v2 gives up by construction: an error in an entry far smaller than its tensor's largest is
+  checked only absolutely. DESIGN.md, under &ldquo;Metric v2&rdquo;, states where that line falls.</p>
+  <details><summary>Every case under both metrics</summary>
+  <div class="wrap"><table>
+    <tr><th>case</th><th>set</th><th>v1 error</th><th></th><th>v2 ratio</th><th></th></tr>
+    ${M.cases.map((x) => `<tr><td><code>${esc(x.name)}</code></td><td>${esc(x.set)}</td>
+      <td class="n">${sci(x.v1)}</td><td class="${x.v1Pass ? 'good' : 'bad'}">${x.v1Pass ? 'pass' : 'fail'}</td>
+      <td class="n">${sci(x.v2)}</td><td class="${x.v2Pass ? 'good' : 'bad'}">${x.v2Pass ? 'pass' : 'fail'}</td></tr>`).join('')}
+  </table></div></details>
+
+  <h3>Fuzzer coverage: how often a sabotaged rule is caught</h3>
+  <p>The detection rate is the fraction of programs containing the sabotaged op that catch it.
+  Before: milestone 1's generator, its first ${n(D.ratePrograms)} programs. After: ${n(F2.programs)} programs from
+  the v2 generator, ${esc(H.generator.corpus)}. Target: above ${pct(D.target, 1)} for matmul,
+  transpose and reshape.</p>
+  <div class="wrap"><table>
+    <tr><th>rule</th><th>before</th><th>after: general</th><th>after: targeted</th><th>after: all</th></tr>
+    ${D.rules.map((r) => `<tr><td><code>${esc(r.rule)}</code></td>${rateCell(r.before)}${rateCell(r.after.general)}
+      ${r.after.targeted.containing ? rateCell(r.after.targeted) : '<td class="n">&mdash;</td>'}
+      ${rateCell(r.after.corpus, targeted.includes(r) ? (met(r.after.corpus) ? 'good' : 'bad') : '')}</tr>`).join('')}
+  </table></div>
+  <p>${short.length
+    ? `<b>Target missed</b> for ${short.map((r) => `<code>${esc(r.rule)}</code> (${pct(r.after.corpus.caught, r.after.corpus.containing)})`).join(' and ')}
+      over the whole corpus. The targeted programs alone clear it
+      (${targeted.map((r) => `${esc(r.rule)} ${pct(r.after.targeted.caught, r.after.targeted.containing)}`).join(', ')}); the general
+      programs do not (${targeted.map((r) => `${esc(r.rule)} ${pct(r.after.general.caught, r.after.general.containing)}`).join(', ')}).
+      The mix was fixed before this measurement and has not been changed to reach the target.`
+    : 'All three targets are met over the whole corpus.'}
+  The general programs keep size-1 dimensions and constant operands on purpose, and those hide
+  these bugs; the targeted programs were shaped after seeing which shapes did, so their rate measures
+  reach for these known bugs, not for unknown ones. The general rate is the less biased number.</p>
+
+  <h3>The v2 generator itself</h3>
+  <p>Gradients against finite differences on the v2 corpus: ${n(F2.agree)} of ${n(F2.programs)} agree,
+  ${F2.mismatch + F2.error} disagree, ${n(F2.rejected)} skipped, worst ${sci(F2.worst)}. Second order on the first
+  ${n(S2.programs)}: ${n(S2.agree)} agree, ${S2.mismatch + S2.error} disagree. Programs are valid by construction:
+  every value carries an interval, sound for inputs in the drawn range (a test checks every value
+  against it), and <code>log</code>, <code>div</code> and <code>exp</code> are only emitted where the interval
+  proves them safe.</p>
+
+  <h3>What went against me in this pass</h3>
+  <p><b>Most ops in the old programs were dead code.</b> Programs output only their last value, so
+  most earlier ops fed nothing, and no checker can catch a bug in code no output depends on.
+  Every unconsumed value is now an output. This, more than any shape change, is what moved the rates.</p>
+  <p><b>The first two versions of the new generator missed the target by more.</b> Their figures
+  are in DESIGN.md, under &ldquo;Detection rate&rdquo;: the generator was revised after seeing them, which is exactly
+  what a reader should know.</p>
+  <p><b>Bugs in my own checks:</b> a targeted generator that silently emitted no broadcast or
+  reshape when its random shape needed none, and a measurement helper whose <code>flatMap</code>
+  over typed arrays produced NaN. Both were caught by tests before any figure was recorded.</p>
+
+  <div class="card lead" style="margin-top:3rem"><b>Milestone 1: the original record.</b> Everything below
+  is as milestone 1 measured it, under the v1 metric and the v1 generator, failures included.</div>
   <h2>What is actually established</h2>
   <div class="wrap"><table class="claims">
     <tr><th>claim</th><th>measured</th><th>checked against</th></tr>
@@ -200,6 +304,7 @@ try {
   <div class="wrap"><table>
     <tr><th>milestone</th><th>what</th><th>status</th></tr>
     <tr><td>1</td><td>tensor IR, autodiff, float64 reference, fuzzed and checked against PyTorch</td><td class="good">done</td></tr>
+    <tr><td>1.5</td><td>hardening: metric v2, generator v2, detection rates</td><td class="good">done</td></tr>
     <tr><td>2</td><td>lowering to WGSL kernels, fuzzed against this interpreter under the float32 budget in DESIGN.md</td><td>not started</td></tr>
     <tr><td>3</td><td>train an MLP, then a small transformer, in the browser; loss curves against PyTorch</td><td>not started</td></tr>
     <tr><td>4</td><td>fusion and autotuning, timed against the hand-written kernels of llm-inference-webgpu</td><td>not started</td></tr>

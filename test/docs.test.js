@@ -40,6 +40,26 @@ test("the README's findings match golden/measurements.json", () => {
   assert.match(readme, /failed none of the random golden cases/);
 });
 
+test("the README's milestone 1.5 figures match golden/measurements.json", () => {
+  const h = JSON.parse(text('../golden/measurements.json')).m1_5;
+  const pc = (x) => `${(100 * x.caught / x.containing).toFixed(1)}%`;
+  const s = h.metric.summary.all;
+  assert.match(readme, new RegExp(`v1 passes ${s.v1Pass} of ${s.cases}, v2 passes ${s.v2Pass} of ${s.cases}`));
+  const a = h.metric.injection.allGradients;
+  assert.match(readme, new RegExp(`v2 flags\\s+${a.flagged} of the ${a.affected} cases`));
+  assert.deepEqual(a.missed.map((m) => m.name), ['random-9']);
+  assert.deepEqual([...new Set(h.metric.injection.perRule.flatMap((r) => r.missed.map((m) => m.name)))], ['random-9']);
+  const before = h.skips.before, after = h.skips.after;
+  assert.match(readme, new RegExp(`${before.rejected} of ${before.programs.toLocaleString('en-US')} \\(${(100 * before.rejected / before.programs).toFixed(1)}%\\) before, ${after.rejected} of ${after.programs.toLocaleString('en-US')} after`));
+  const r = Object.fromEntries(h.detection.rules.map((x) => [x.rule, x]));
+  const cells = ['matmul', 'transpose', 'reshape'];
+  assert.match(readme, new RegExp(cells.map((k) => `${k} ${pc(r[k].before)} to ${pc(r[k].after.corpus)}`).join(',\\s+').replace('reshape', '\\s*reshape')));
+  assert.match(readme, new RegExp(`reach ${cells.map((k) => pc(r[k].after.targeted)).join(', ').replace(/, ([^,]+)$/, ' and $1')}`));
+  assert.match(readme, new RegExp(`alone\\s+${cells.map((k) => pc(r[k].after.general)).join(', ').replace(/, ([^,]+)$/, ' and $1')}`));
+  const met = cells.filter((k) => r[k].after.corpus.caught / r[k].after.corpus.containing > h.detection.target);
+  assert.deepEqual(met, ['transpose'], 'the README says the target is met for transpose only');
+});
+
 test('the report page types in no measured number', () => {
   // Every figure comes from measurements.json. The page's own numerals are
   // limited to fixed context: milestone numbers, 10⁴, 20 draws, logits near 800.
@@ -49,7 +69,8 @@ test('the report page types in no measured number', () => {
   const prose = (body + script.replace(/\$\{[^}]*\}/g, '')).replace(/<[^>]+>/g, ' ');
   const numerals = prose.match(/\b\d+(\.\d+)?(e-?\d+)?\b/g) ?? [];
   // 1e-3 and 1e4 are sci()'s display thresholds for switching to exponent form.
-  const allowed = new Set(['1', '2', '3', '4', '10', '20', '800', '100', '0', '1e-3', '1e4']);
+  // 1.5 is the hardening milestone's name.
+  const allowed = new Set(['1', '2', '3', '4', '10', '20', '800', '100', '0', '1e-3', '1e4', '1.5']);
   const stray = numerals.filter((d) => !allowed.has(d));
   assert.deepEqual(stray, [], `numbers typed into index.html: ${stray.join(', ')}`);
 });

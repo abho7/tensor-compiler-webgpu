@@ -22,6 +22,7 @@ So the first milestone is the reference that everything after it is checked agai
 | milestone | what | status |
 |---|---|---|
 | 1 | tensor IR, autodiff, float64 reference; fuzzed, and checked against PyTorch | **done** |
+| 1.5 | hardening: comparison metric v2, generator v2, per-bug detection rates | **done** |
 | 2 | lowering to WGSL, fuzzed against the interpreter under the float32 budget | not started |
 | 3 | train an MLP, then a small transformer, in the browser; loss curves against PyTorch | not started |
 | 4 | fusion and autotuning, timed against llm-inference-webgpu's hand-written kernels | not started |
@@ -55,7 +56,8 @@ definition later backends are judged against, and it is itself judged against Py
 | comparison | budget |
 |---|---|
 | autodiff vs finite differences, per element, `abs(g - fd) / max(1, abs(g), abs(fd))` | 1e-6 |
-| values and gradients vs PyTorch float64, per tensor, `max abs diff / max abs(torch)` | 1e-12 |
+| values and gradients vs PyTorch float64, per tensor, `max abs diff / max abs(torch)` (v1, milestone 1) | 1e-12 |
+| the same, per element, `abs diff <= atol + rtol * abs(torch)`, `atol = 1e-12 * max(1, max abs(torch))` (v2, from milestone 1.5) | rtol 1e-12 |
 | from M2, GPU float32 vs this interpreter | per op class, from the WGSL spec's accuracy: see DESIGN.md |
 
 ## How milestone 1 is checked
@@ -102,10 +104,41 @@ the findings.
   failed none of the random golden cases; a hand-built case was added for it. And a uniform
   relative error in `exp` passes every softmax case, because it cancels in the ratio.
 
+## Milestone 1.5: hardening before the GPU
+
+Decided before any GPU measurement exists, and recorded in DESIGN.md as dated amendments.
+Every figure here is in [`golden/measurements.json`](golden/measurements.json) and on the report;
+test/docs.test.js checks the ones quoted below.
+
+- **Metric v2.** Per element, `abs(ours - ref) <= atol + rtol * abs(ref)` with
+  `atol = 1e-12 * max(1, max abs(ref))` and `rtol = 1e-12`. Every case is scored under both
+  metrics: v1 passes 111 of 112, v2 passes 112 of 112, and the difference is exactly
+  `random-9`. To show v2 is not too loose, every gradient was multiplied by 1 + 1e-4: v2 flags
+  101 of the 102 cases whose gradient changed, and the one it misses is `random-9`, whose true
+  gradient is zero (the "error" is residue times 1e-4). Each rule scaled by 1 + 1e-4 on its own:
+  every miss is again `random-9`.
+- **Skipped programs: 114 of 3,000 (3.8%) before, 0 of 2,000 after.** The skips were the
+  generator's fault: 94 of 114 applied `log` to a value that could be negative, 18 divided by
+  one that could reach zero. Generator v2 carries a sound interval for every value and emits
+  `log`, `div` and `exp` only where the interval proves them safe; a test checks every value
+  of 300 programs against its interval.
+- **Detection rates**, the fraction of programs containing a sabotaged op that catch it,
+  before and after over the whole v2 corpus: matmul 14.0% to 49.3%, transpose 5.4% to 53.9%,
+  reshape 3.6% to 42.1%. **The 50% target is met for transpose and missed for matmul and
+  reshape.** Targeted programs alone reach 98.5%, 94.0% and 73.0%; general programs alone
+  27.9%, 30.2% and 30.1%. The corpus mix was not changed to reach the target.
+- **What moved the rates most was not shapes.** Programs used to output only their last value,
+  so most ops were dead code, and no checker catches a bug no output depends on. Every
+  unconsumed value is now an output. The remaining misses in general programs are shapes where
+  the bug cannot show (an inner dimension of 1, where a reshape and a transpose coincide) and
+  constant operands with no gradient to get wrong. The targeted builders were shaped after
+  seeing that, so their rate measures reach for these known bugs; the general rate is the less
+  biased one.
+
 ## Running it
 
 ```
-node --test                # everything, including recomputing measurements.json (about a minute)
+node --test                # everything, including recomputing measurements.json (minutes)
 node tools/measure.js      # rewrite golden/measurements.json
 node tools/serve.js        # the report at http://localhost:8099/
 ```
@@ -125,7 +158,7 @@ node tools/export-cases.js
 src/ir/         graph, shape rules, builder (broadcasting, softmax, log-softmax)
 src/autodiff.js the transform and its rule table
 src/interp.js   the float64 reference interpreter
-src/testing/    RNG, random programs, gradient checker, sabotage, golden comparison, measurement
+src/testing/    RNG, random programs (v1 frozen, v2), gradient checker, sabotage, golden comparison, measurement
 oracle/         torch_golden.py (offline only)
 golden/         cases.json, torch.json, measurements.json
 tools/          export-cases.js, measure.js, serve.js

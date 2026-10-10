@@ -366,5 +366,1617 @@
     }
    ]
   }
+ },
+ "m1_5": {
+  "producedBy": "node tools/measure.js",
+  "generator": {
+   "maxSize": 96,
+   "targets": [
+    "matmul",
+    "transpose",
+    "reshape",
+    "broadcast",
+    "sum"
+   ],
+   "corpus": "odd indices general, even indices targeted, cycling through the targets"
+  },
+  "skips": {
+   "before": {
+    "programs": 3000,
+    "rejected": 114
+   },
+   "after": {
+    "programs": 2000,
+    "rejected": 0
+   }
+  },
+  "fuzz": {
+   "programs": 2000,
+   "agree": 2000,
+   "mismatch": 0,
+   "error": 0,
+   "rejected": 0,
+   "rejectedDraws": 1,
+   "worst": 1.4366013156852375e-8,
+   "worstIndex": 873,
+   "failures": [],
+   "opsChecked": {
+    "input": 2000,
+    "relu": 504,
+    "sub": 692,
+    "tanh": 1335,
+    "mul": 1214,
+    "const": 409,
+    "add": 524,
+    "log": 451,
+    "max": 409,
+    "stopGradient": 409,
+    "broadcast": 974,
+    "exp": 873,
+    "sum": 937,
+    "transpose": 538,
+    "reshape": 712,
+    "matmul": 659,
+    "neg": 156,
+    "div": 380
+   }
+  },
+  "secondOrder": {
+   "programs": 300,
+   "agree": 300,
+   "mismatch": 0,
+   "error": 0,
+   "rejected": 0,
+   "rejectedDraws": 1,
+   "worst": 6.755155101956234e-9,
+   "worstIndex": 209,
+   "failures": [],
+   "opsChecked": {
+    "input": 300,
+    "relu": 70,
+    "sub": 106,
+    "tanh": 191,
+    "mul": 191,
+    "const": 67,
+    "add": 81,
+    "log": 60,
+    "max": 61,
+    "stopGradient": 61,
+    "broadcast": 139,
+    "exp": 127,
+    "sum": 145,
+    "transpose": 87,
+    "reshape": 104,
+    "matmul": 85,
+    "neg": 27,
+    "div": 59
+   }
+  },
+  "detection": {
+   "target": 0.5,
+   "ratePrograms": 1000,
+   "rules": [
+    {
+     "rule": "add",
+     "bug": "second operand receives -g",
+     "targeted": false,
+     "before": {
+      "containing": 573,
+      "caught": 140
+     },
+     "after": {
+      "general": {
+       "containing": 412,
+       "caught": 321
+      },
+      "targeted": {
+       "containing": 112,
+       "caught": 90
+      },
+      "corpus": {
+       "containing": 524,
+       "caught": 411
+      }
+     },
+     "firstCatch": 1
+    },
+    {
+     "rule": "sub",
+     "bug": "second operand receives +g (sign dropped)",
+     "targeted": false,
+     "before": {
+      "containing": 655,
+      "caught": 227
+     },
+     "after": {
+      "general": {
+       "containing": 652,
+       "caught": 554
+      },
+      "targeted": {
+       "containing": 40,
+       "caught": 0
+      },
+      "corpus": {
+       "containing": 692,
+       "caught": 554
+      }
+     },
+     "firstCatch": 1
+    },
+    {
+     "rule": "mul",
+     "bug": "each operand multiplied by itself instead of the other",
+     "targeted": false,
+     "before": {
+      "containing": 531,
+      "caught": 136
+     },
+     "after": {
+      "general": {
+       "containing": 393,
+       "caught": 274
+      },
+      "targeted": {
+       "containing": 821,
+       "caught": 815
+      },
+      "corpus": {
+       "containing": 1214,
+       "caught": 1089
+      }
+     },
+     "firstCatch": 1
+    },
+    {
+     "rule": "div",
+     "bug": "denominator gradient missing its minus sign",
+     "targeted": false,
+     "before": {
+      "containing": 546,
+      "caught": 234
+     },
+     "after": {
+      "general": {
+       "containing": 286,
+       "caught": 207
+      },
+      "targeted": {
+       "containing": 94,
+       "caught": 81
+      },
+      "corpus": {
+       "containing": 380,
+       "caught": 288
+      }
+     },
+     "firstCatch": 11
+    },
+    {
+     "rule": "neg",
+     "bug": "passes g through unnegated",
+     "targeted": false,
+     "before": {
+      "containing": 141,
+      "caught": 45
+     },
+     "after": {
+      "general": {
+       "containing": 154,
+       "caught": 130
+      },
+      "targeted": {
+       "containing": 2,
+       "caught": 1
+      },
+      "corpus": {
+       "containing": 156,
+       "caught": 131
+      }
+     },
+     "firstCatch": 7
+    },
+    {
+     "rule": "exp",
+     "bug": "multiplies by the input instead of the result",
+     "targeted": false,
+     "before": {
+      "containing": 649,
+      "caught": 308
+     },
+     "after": {
+      "general": {
+       "containing": 657,
+       "caught": 592
+      },
+      "targeted": {
+       "containing": 216,
+       "caught": 208
+      },
+      "corpus": {
+       "containing": 873,
+       "caught": 800
+      }
+     },
+     "firstCatch": 1
+    },
+    {
+     "rule": "log",
+     "bug": "divides by the result instead of the input",
+     "targeted": false,
+     "before": {
+      "containing": 417,
+      "caught": 186
+     },
+     "after": {
+      "general": {
+       "containing": 401,
+       "caught": 374
+      },
+      "targeted": {
+       "containing": 50,
+       "caught": 50
+      },
+      "corpus": {
+       "containing": 451,
+       "caught": 424
+      }
+     },
+     "firstCatch": 1
+    },
+    {
+     "rule": "relu",
+     "bug": "no mask: passes g through everywhere",
+     "targeted": false,
+     "before": {
+      "containing": 391,
+      "caught": 124
+     },
+     "after": {
+      "general": {
+       "containing": 410,
+       "caught": 286
+      },
+      "targeted": {
+       "containing": 94,
+       "caught": 84
+      },
+      "corpus": {
+       "containing": 504,
+       "caught": 370
+      }
+     },
+     "firstCatch": 7
+    },
+    {
+     "rule": "tanh",
+     "bug": "1 - y instead of 1 - y²",
+     "targeted": false,
+     "before": {
+      "containing": 291,
+      "caught": 127
+     },
+     "after": {
+      "general": {
+       "containing": 389,
+       "caught": 332
+      },
+      "targeted": {
+       "containing": 946,
+       "caught": 941
+      },
+      "corpus": {
+       "containing": 1335,
+       "caught": 1273
+      }
+     },
+     "firstCatch": 2
+    },
+    {
+     "rule": "matmul",
+     "bug": "aᵀ formed by reshape instead of transpose",
+     "targeted": true,
+     "before": {
+      "containing": 492,
+      "caught": 69
+     },
+     "after": {
+      "general": {
+       "containing": 459,
+       "caught": 128
+      },
+      "targeted": {
+       "containing": 200,
+       "caught": 197
+      },
+      "corpus": {
+       "containing": 659,
+       "caught": 325
+      }
+     },
+     "firstCatch": 10
+    },
+    {
+     "rule": "sum",
+     "bug": "mean instead of sum: g divided by the axis length",
+     "targeted": true,
+     "before": {
+      "containing": 620,
+      "caught": 216
+     },
+     "after": {
+      "general": {
+       "containing": 618,
+       "caught": 444
+      },
+      "targeted": {
+       "containing": 319,
+       "caught": 309
+      },
+      "corpus": {
+       "containing": 937,
+       "caught": 753
+      }
+     },
+     "firstCatch": 1
+    },
+    {
+     "rule": "broadcast",
+     "bug": "mean instead of sum over the expanded axes",
+     "targeted": true,
+     "before": {
+      "containing": 745,
+      "caught": 311
+     },
+     "after": {
+      "general": {
+       "containing": 674,
+       "caught": 556
+      },
+      "targeted": {
+       "containing": 300,
+       "caught": 278
+      },
+      "corpus": {
+       "containing": 974,
+       "caught": 834
+      }
+     },
+     "firstCatch": 1
+    },
+    {
+     "rule": "reshape",
+     "bug": "last two axes swapped before reshaping back (a layout mix-up)",
+     "targeted": true,
+     "before": {
+      "containing": 419,
+      "caught": 15
+     },
+     "after": {
+      "general": {
+       "containing": 512,
+       "caught": 154
+      },
+      "targeted": {
+       "containing": 200,
+       "caught": 146
+      },
+      "corpus": {
+       "containing": 712,
+       "caught": 300
+      }
+     },
+     "firstCatch": 4
+    },
+    {
+     "rule": "transpose",
+     "bug": "applies perm again instead of its inverse",
+     "targeted": true,
+     "before": {
+      "containing": 224,
+      "caught": 12
+     },
+     "after": {
+      "general": {
+       "containing": 338,
+       "caught": 102
+      },
+      "targeted": {
+       "containing": 200,
+       "caught": 188
+      },
+      "corpus": {
+       "containing": 538,
+       "caught": 290
+      }
+     },
+     "firstCatch": 2
+    },
+    {
+     "rule": "stopGradient",
+     "bug": "lets the gradient through, like identity",
+     "targeted": false,
+     "before": {
+      "containing": 423,
+      "caught": 229
+     },
+     "after": {
+      "general": {
+       "containing": 369,
+       "caught": 351
+      },
+      "targeted": {
+       "containing": 40,
+       "caught": 40
+      },
+      "corpus": {
+       "containing": 409,
+       "caught": 391
+      }
+     },
+     "firstCatch": 1
+    }
+   ]
+  },
+  "metric": {
+   "formula": "abs(ours - torch) <= atol + rtol * abs(torch), atol = atolScale * max(1, max abs(torch over the tensor))",
+   "rtol": 1e-12,
+   "atolScale": 1e-12,
+   "v1Tolerance": 1e-12,
+   "summary": {
+    "m1": {
+     "cases": 72,
+     "v1Pass": 71,
+     "v2Pass": 72,
+     "worstV2": 0.00044408920985006256
+    },
+    "m1.5": {
+     "cases": 40,
+     "v1Pass": 40,
+     "v2Pass": 40,
+     "worstV2": 0.00032044500013233315
+    },
+    "all": {
+     "cases": 112,
+     "v1Pass": 111,
+     "v2Pass": 112,
+     "worstV2": 0.00044408920985006256
+    }
+   },
+   "cases": [
+    {
+     "name": "random-2",
+     "set": "m1",
+     "kind": "random",
+     "v1": 2.0211370946362213e-16,
+     "v1Pass": true,
+     "v2": 0.00010105685473181107,
+     "v2Pass": true
+    },
+    {
+     "name": "random-3",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-4",
+     "set": "m1",
+     "kind": "random",
+     "v1": 1.5969145917015971e-16,
+     "v1Pass": true,
+     "v2": 0.00007984572958507986,
+     "v2Pass": true
+    },
+    {
+     "name": "random-5",
+     "set": "m1",
+     "kind": "random",
+     "v1": 5.761269472312136e-16,
+     "v1Pass": true,
+     "v2": 0.0002880634736156068,
+     "v2Pass": true
+    },
+    {
+     "name": "random-6",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-7",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-8",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-9",
+     "set": "m1",
+     "kind": "random",
+     "v1": 2,
+     "v1Pass": false,
+     "v2": 0.00044408920985006256,
+     "v2Pass": true
+    },
+    {
+     "name": "random-10",
+     "set": "m1",
+     "kind": "random",
+     "v1": 6.526412088233511e-17,
+     "v1Pass": true,
+     "v2": 0.00004666986357116479,
+     "v2Pass": true
+    },
+    {
+     "name": "random-11",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-12",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-13",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-14",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-15",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-16",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-17",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-18",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-19",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-20",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-21",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-22",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-23",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-24",
+     "set": "m1",
+     "kind": "random",
+     "v1": 8.506003704405326e-16,
+     "v1Pass": true,
+     "v2": 0.0002917629462363648,
+     "v2Pass": true
+    },
+    {
+     "name": "random-25",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-26",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-27",
+     "set": "m1",
+     "kind": "random",
+     "v1": 1.1541006861916074e-16,
+     "v1Pass": true,
+     "v2": 0.00003748244821991531,
+     "v2Pass": true
+    },
+    {
+     "name": "random-28",
+     "set": "m1",
+     "kind": "random",
+     "v1": 8.600546485252499e-18,
+     "v1Pass": true,
+     "v2": 0.00000813681041458177,
+     "v2Pass": true
+    },
+    {
+     "name": "random-29",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-30",
+     "set": "m1",
+     "kind": "random",
+     "v1": 2.2085851805195777e-16,
+     "v1Pass": true,
+     "v2": 0.00011042925902597888,
+     "v2Pass": true
+    },
+    {
+     "name": "random-31",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-32",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-33",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-34",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-35",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-36",
+     "set": "m1",
+     "kind": "random",
+     "v1": 9.95604026092815e-17,
+     "v1Pass": true,
+     "v2": 0.00009277796365383531,
+     "v2Pass": true
+    },
+    {
+     "name": "random-37",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-38",
+     "set": "m1",
+     "kind": "random",
+     "v1": 1.1730829977426194e-16,
+     "v1Pass": true,
+     "v2": 0.0000728880875941137,
+     "v2Pass": true
+    },
+    {
+     "name": "random-39",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-41",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-42",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-43",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-44",
+     "set": "m1",
+     "kind": "random",
+     "v1": 2.487703655065408e-16,
+     "v1Pass": true,
+     "v2": 0.0001243851827532704,
+     "v2Pass": true
+    },
+    {
+     "name": "random-45",
+     "set": "m1",
+     "kind": "random",
+     "v1": 1.6212087919107015e-16,
+     "v1Pass": true,
+     "v2": 0.00008106043959553506,
+     "v2Pass": true
+    },
+    {
+     "name": "random-46",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-47",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-48",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-49",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-50",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-51",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-52",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-53",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-54",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-55",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-56",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-57",
+     "set": "m1",
+     "kind": "random",
+     "v1": 6.347312308494297e-17,
+     "v1Pass": true,
+     "v2": 0.00005646188314786677,
+     "v2Pass": true
+    },
+    {
+     "name": "random-59",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-60",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-61",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-62",
+     "set": "m1",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "random-63",
+     "set": "m1",
+     "kind": "random",
+     "v1": 3.2560874534636354e-16,
+     "v1Pass": true,
+     "v2": 0.00013201720611174866,
+     "v2Pass": true
+    },
+    {
+     "name": "softmax-5-axis0",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 3.40122535290352e-16,
+     "v1Pass": true,
+     "v2": 0.00006689090341481621,
+     "v2Pass": true
+    },
+    {
+     "name": "softmax-3x4-axis1",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 1.3590004584712217e-16,
+     "v1Pass": true,
+     "v2": 0.00007936307665382008,
+     "v2Pass": true
+    },
+    {
+     "name": "softmax-3x4-axis0",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 2.1606328984842903e-16,
+     "v1Pass": true,
+     "v2": 0.00005435292884025488,
+     "v2Pass": true
+    },
+    {
+     "name": "softmax-2x3x4-axis1",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 5.009721238625414e-16,
+     "v1Pass": true,
+     "v2": 0.00011128693706672447,
+     "v2Pass": true
+    },
+    {
+     "name": "logSoftmax-5-axis0",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 1.5773510781528036e-16,
+     "v1Pass": true,
+     "v2": 0.00007886755390764018,
+     "v2Pass": true
+    },
+    {
+     "name": "logSoftmax-3x4-axis1",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 2.922862997130654e-17,
+     "v1Pass": true,
+     "v2": 0.000027079209277640267,
+     "v2Pass": true
+    },
+    {
+     "name": "logSoftmax-2x3x4-axis2",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 1.6273442476651204e-16,
+     "v1Pass": true,
+     "v2": 0.00011794682346562685,
+     "v2Pass": true
+    },
+    {
+     "name": "softmax-2x6-axis1-large",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 2.8602396004895645e-16,
+     "v1Pass": true,
+     "v2": 0.00007006292977655242,
+     "v2Pass": true
+    },
+    {
+     "name": "logSoftmax-2x6-axis1-large",
+     "set": "m1",
+     "kind": "composite",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "mlp-nll",
+     "set": "m1",
+     "kind": "model",
+     "v1": 2.4764632954048173e-16,
+     "v1Pass": true,
+     "v2": 0.00010080755308047888,
+     "v2Pass": true
+    },
+    {
+     "name": "attention",
+     "set": "m1",
+     "kind": "model",
+     "v1": 2.34296594283152e-16,
+     "v1Pass": true,
+     "v2": 0.00008229916299388935,
+     "v2Pass": true
+    },
+    {
+     "name": "transpose-cycles",
+     "set": "m1",
+     "kind": "model",
+     "v1": 3.0594436030831317e-16,
+     "v1Pass": true,
+     "v2": 0.0001668874019710347,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-1",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.1278768132078743e-16,
+     "v1Pass": true,
+     "v2": 0.00009749667703996313,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-2",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 2.194614274398552e-16,
+     "v1Pass": true,
+     "v2": 0.00006521108336062232,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-3",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-4",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-5",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.7822604500729663e-16,
+     "v1Pass": true,
+     "v2": 0.00008911302250364832,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-6",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-7",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-8",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.3364611666557922e-16,
+     "v1Pass": true,
+     "v2": 0.00007427381774391319,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-9",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 5.551132562002238e-17,
+     "v1Pass": true,
+     "v2": 0.00004174502538140468,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-10",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.2091235071164168e-16,
+     "v1Pass": true,
+     "v2": 0.00010370735509677126,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-11",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 6.105265975255022e-16,
+     "v1Pass": true,
+     "v2": 0.00030526329876275115,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-12",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.599719915461018e-16,
+     "v1Pass": true,
+     "v2": 0.00002365190565707027,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-13",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-14",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 6.255536368311417e-17,
+     "v1Pass": true,
+     "v2": 0.00005194053987153526,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-15",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 3.161571545364689e-16,
+     "v1Pass": true,
+     "v2": 0.00017880180895433253,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-16",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.2413642529592387e-16,
+     "v1Pass": true,
+     "v2": 0.00006206821264796193,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-17",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-18",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 3.098732950695967e-16,
+     "v1Pass": true,
+     "v2": 0.00015493664753479837,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-19",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.4062604041442151e-15,
+     "v1Pass": true,
+     "v2": 0.000269287327741316,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-20",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.5635100335084963e-16,
+     "v1Pass": true,
+     "v2": 0.00004199513079818623,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-21",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.6728018373231763e-16,
+     "v1Pass": true,
+     "v2": 0.00008364009186615881,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-22",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 2.384655232715874e-16,
+     "v1Pass": true,
+     "v2": 0.00007625415295897904,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-23",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 0,
+     "v1Pass": true,
+     "v2": 0,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-24",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 1.2137094760829514e-16,
+     "v1Pass": true,
+     "v2": 0.00007653408218177082,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-random-25",
+     "set": "m1.5",
+     "kind": "random",
+     "v1": 2.06495742553827e-16,
+     "v1Pass": true,
+     "v2": 0.00018176587072385073,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-matmul-1",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 2.511954449330882e-16,
+     "v1Pass": true,
+     "v2": 0.0001503572333949904,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-matmul-2",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 8.685088537533303e-17,
+     "v1Pass": true,
+     "v2": 0.00005396403021006864,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-matmul-3",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 4.825493735136611e-16,
+     "v1Pass": true,
+     "v2": 0.00032044500013233315,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-transpose-1",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 1.6366436993913737e-16,
+     "v1Pass": true,
+     "v2": 0.00010650904794073947,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-transpose-2",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 3.419291220673977e-16,
+     "v1Pass": true,
+     "v2": 0.00020743050399163934,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-transpose-3",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 6.167017212660259e-17,
+     "v1Pass": true,
+     "v2": 0.0000527623016833075,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-reshape-1",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 2.3895332436963014e-16,
+     "v1Pass": true,
+     "v2": 0.00015072653399700897,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-reshape-2",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 3.955403413995352e-17,
+     "v1Pass": true,
+     "v2": 0.00003671378361169445,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-reshape-3",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 1.4164374126654807e-16,
+     "v1Pass": true,
+     "v2": 0.00008155295584013147,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-broadcast-1",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 2.6074000449794074e-16,
+     "v1Pass": true,
+     "v2": 0.00012001412497302771,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-broadcast-2",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 2.1458116245963043e-16,
+     "v1Pass": true,
+     "v2": 0.00004513596595193911,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-broadcast-3",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 1.0730501466671618e-15,
+     "v1Pass": true,
+     "v2": 0.00002705575005862024,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-sum-1",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 9.330573888049135e-17,
+     "v1Pass": true,
+     "v2": 0.00006788045780644229,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-sum-2",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 1.576716319465684e-16,
+     "v1Pass": true,
+     "v2": 0.00006821312130429341,
+     "v2Pass": true
+    },
+    {
+     "name": "v2-sum-3",
+     "set": "m1.5",
+     "kind": "targeted",
+     "v1": 1.0103732275600367e-18,
+     "v1Pass": true,
+     "v2": 0.000001006180008849655,
+     "v2Pass": true
+    }
+   ],
+   "injection": {
+    "factor": 1.0001,
+    "allGradients": {
+     "affected": 102,
+     "flagged": 101,
+     "missed": [
+      {
+       "name": "random-9",
+       "change": 2.2204460492500685e-20,
+       "gradScale": 2.220446049250313e-16
+      }
+     ]
+    },
+    "perRule": [
+     {
+      "op": "add",
+      "affected": 26,
+      "flagged": 26,
+      "missed": []
+     },
+     {
+      "op": "sub",
+      "affected": 39,
+      "flagged": 39,
+      "missed": []
+     },
+     {
+      "op": "mul",
+      "affected": 37,
+      "flagged": 37,
+      "missed": []
+     },
+     {
+      "op": "div",
+      "affected": 25,
+      "flagged": 25,
+      "missed": []
+     },
+     {
+      "op": "neg",
+      "affected": 9,
+      "flagged": 9,
+      "missed": []
+     },
+     {
+      "op": "exp",
+      "affected": 49,
+      "flagged": 49,
+      "missed": []
+     },
+     {
+      "op": "log",
+      "affected": 22,
+      "flagged": 22,
+      "missed": []
+     },
+     {
+      "op": "relu",
+      "affected": 19,
+      "flagged": 18,
+      "missed": [
+       {
+        "name": "random-9",
+        "change": 1.1102230246251565e-16,
+        "gradScale": 2.220446049250313e-16
+       }
+      ]
+     },
+     {
+      "op": "tanh",
+      "affected": 31,
+      "flagged": 31,
+      "missed": []
+     },
+     {
+      "op": "matmul",
+      "affected": 32,
+      "flagged": 31,
+      "missed": [
+       {
+        "name": "random-9",
+        "change": 1.1102230246251565e-16,
+        "gradScale": 2.220446049250313e-16
+       }
+      ]
+     },
+     {
+      "op": "sum",
+      "affected": 49,
+      "flagged": 48,
+      "missed": [
+       {
+        "name": "random-9",
+        "change": 1.1102230246251565e-16,
+        "gradScale": 2.220446049250313e-16
+       }
+      ]
+     },
+     {
+      "op": "broadcast",
+      "affected": 52,
+      "flagged": 52,
+      "missed": []
+     },
+     {
+      "op": "reshape",
+      "affected": 28,
+      "flagged": 28,
+      "missed": []
+     },
+     {
+      "op": "transpose",
+      "affected": 18,
+      "flagged": 17,
+      "missed": [
+       {
+        "name": "random-9",
+        "change": 1.1102230246251565e-16,
+        "gradScale": 2.220446049250313e-16
+       }
+      ]
+     }
+    ]
+   }
+  }
  }
 }
