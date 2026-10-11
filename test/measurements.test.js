@@ -9,6 +9,6 @@ test('golden/measurements.json is what the code measures today', { timeout: 600_
   // Nothing in milestone 1 is timed, so every figure the report shows is
   // deterministic. A stale file, or a hand-edited number, fails here.
   const fresh = measureAll({ cases: read('../golden/cases.json').cases, golden: read('../golden/torch.json'),
-  gpu: { record: read('../golden/gpu-m2.json'), run1: read('../golden/gpu-m2-run1-direct.json') } });
+  gpu: { record: read('../golden/gpu-m2.json'), run1: read('../golden/gpu-m2-run1-direct.json'), oob: read('../golden/gpu-oob.json') } });
   assert.deepEqual(JSON.parse(JSON.stringify(fresh)), read('../golden/measurements.json'));
 });

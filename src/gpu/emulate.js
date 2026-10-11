@@ -7,6 +7,12 @@
 //
 // It models the kernels' index logic as codegen.js writes it; it does not run
 // WGSL. The GPU itself is the final check.
+//
+// Options for analysis: `oobRead` is what a read past the end of an input returns
+// ('nan', the default, so a model that reads out of bounds cannot pass by
+// accident; 'zero', what golden/gpu-oob.json recorded on this project's
+// adapter; or 'clamp', the last element). `tiledEdge` '<=' models the tiled
+// matmul's off-by-one sabotage.
 
 import { WG, MM_WG, TILE, MAX_RANK } from './codegen.js';
 import { size } from '../ir/shapes.js';
@@ -28,7 +34,9 @@ function threads1d(grid, body) {
  * { out, writes, oob }: the output, how many times each element was written,
  * and the number of writes past the end.
  */
-export function emulateLaunch(launch, outLength, read, { guard = true } = {}) {
+export function emulateLaunch(launch, outLength, read, { guard = true, oobRead = 'nan', tiledEdge = '<' } = {}) {
+  const at = (arr, i) => (i < arr.length ? arr[i] : oobRead === 'zero' ? 0 : oobRead === 'clamp' ? arr[arr.length - 1] : NaN);
+  const inK = tiledEdge === '<=' ? (kk, K) => kk <= K : (kk, K) => kk < K;
   const out = new Float64Array(outLength);
   const writes = new Uint32Array(outLength);
   let oob = 0;
@@ -42,22 +50,22 @@ export function emulateLaunch(launch, outLength, read, { guard = true } = {}) {
   if (UNARY[k] || BINARY[k]) {
     threads1d(launch.grid, (i) => {
       if (guard && i >= P[0]) return;
-      write(i, UNARY[k] ? UNARY[k](A[i]) : BINARY[k](A[i], B[i]));
+      write(i, UNARY[k] ? UNARY[k](at(A, i)) : BINARY[k](at(A, i), at(B, i)));
     });
   } else if (k === 'gather') {
     threads1d(launch.grid, (i) => {
       if (i >= P[0]) return;
       let rem = i, src = 0;
       for (let d = P[1] - 1; d >= 0; d--) { src += (rem % P[2 + d]) * P[2 + MAX_RANK + d]; rem = Math.floor(rem / P[2 + d]); }
-      write(i, A[src]);
+      write(i, at(A, src));
     });
   } else if (k === 'sum' || k === 'max') {
     const [outer, n, inner] = P;
     threads1d(launch.grid, (i) => {
       if (i >= outer * inner) return;
       const base = Math.floor(i / inner) * n * inner + (i % inner);
-      let acc = k === 'sum' ? 0 : A[base];
-      for (let t = k === 'sum' ? 0 : 1; t < n; t++) acc = k === 'sum' ? acc + A[base + t * inner] : Math.max(acc, A[base + t * inner]);
+      let acc = k === 'sum' ? 0 : at(A, base);
+      for (let t = k === 'sum' ? 0 : 1; t < n; t++) acc = k === 'sum' ? acc + at(A, base + t * inner) : Math.max(acc, at(A, base + t * inner));
       write(i, acc);
     });
   } else if (k === 'matmul-naive' || k === 'matmul-tiled') {
@@ -68,14 +76,14 @@ export function emulateLaunch(launch, outLength, read, { guard = true } = {}) {
       if (row >= M || col >= N) continue;
       let acc = 0;
       if (k === 'matmul-naive') {
-        for (let p = 0; p < K; p++) acc += A[b * M * K + row * K + p] * B[b * K * N + p * N + col];
+        for (let p = 0; p < K; p++) acc += at(A, b * M * K + row * K + p) * at(B, b * K * N + p * N + col);
       } else {
         // Tile by tile, loads past the edge reading zero, as the kernel does.
         for (let t0 = 0; t0 * TILE < K; t0++) {
           for (let p = 0; p < TILE; p++) {
             const kk = t0 * TILE + p;
-            const av = kk < K ? A[b * M * K + row * K + kk] : 0;
-            const bv = kk < K ? B[b * K * N + kk * N + col] : 0;
+            const av = inK(kk, K) ? at(A, b * M * K + row * K + kk) : 0;
+            const bv = inK(kk, K) ? at(B, b * K * N + kk * N + col) : 0;
             acc += av * bv;
           }
         }
@@ -88,13 +96,18 @@ export function emulateLaunch(launch, outLength, read, { guard = true } = {}) {
   return { out, writes, oob };
 }
 
-/** Emulate a whole lowered graph; inputs and constants come from the interpreter. */
-export function emulate(graph, lowered, inputs, options) {
+/**
+ * Emulate a whole lowered graph. Inputs come from `inputs`; constants from the
+ * interpreter, or, with `options.leaves` (an array per node), from there, so a
+ * caller can start from exactly the float32-rounded leaves the reference used.
+ */
+export function emulate(graph, lowered, inputs, options = {}) {
   const values = new Array(graph.nodes.length);
   const reports = [];
   for (const node of graph.nodes) {
-    if (node.op === 'input') values[node.id] = Float64Array.from(inputs[node.attrs.name]);
-    if (node.op === 'const') values[node.id] = KERNELS.const(node);
+    if (options.leaves && (node.op === 'input' || node.op === 'const')) values[node.id] = options.leaves[node.id];
+    else if (node.op === 'input') values[node.id] = Float64Array.from(inputs[node.attrs.name]);
+    else if (node.op === 'const') values[node.id] = KERNELS.const(node);
   }
   for (const launch of lowered.launches) {
     const r = emulateLaunch(launch, size(graph.nodes[launch.node].shape), (id) => values[id], options);
