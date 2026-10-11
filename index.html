@@ -62,9 +62,9 @@
     GPU, and when does it lose? That needs measured numbers, including the cases where fusion
     is neutral or slower. Fused kernels are only worth timing once they are known to compute
     the same thing as the unfused ones, so the first milestone is the reference everything
-    will be checked against. <b>This page reports milestone 1 of 4, and the hardening pass
-    after it (1.5).</b> Nothing from milestone 1 has been removed: its record, failures and
-    false alarm included, is further down, unchanged.</p>
+    will be checked against. <b>This page reports milestones 1 and 2 of 4, and the hardening
+    pass between them (1.5).</b> Nothing earlier has been removed: each milestone's record,
+    failures and false alarms included, is further down, unchanged.</p>
   </div>
 
   <div class="links">
@@ -76,8 +76,10 @@
   <div id="report">Loading measurements&hellip;</div>
 
   <footer>Every number on this page is read from <code>golden/measurements.json</code>, produced by
-  <code>node tools/measure.js</code>. Nothing so far is timed, so every figure is deterministic,
-  and CI recomputes the file and fails if it differs. Hover a figure for its full value.</footer>
+  <code>node tools/measure.js</code>. Nothing so far is timed. Milestones 1 and 1.5 are deterministic
+  and CI recomputes them; milestone 2's GPU results are recorded by <code>web/gpu.html</code> in a
+  real browser, and CI checks they came from the sources checked in. Hover a figure for its full
+  value.</footer>
 </main>
 
 <script type="module">
@@ -93,7 +95,7 @@ const n = (v) => Number(v).toLocaleString('en-US');
 const pct = (a, b) => `${(100 * a / b).toFixed(1)}%`;
 
 try {
-  const { m1, m1_5: H } = await (await fetch('golden/measurements.json')).json();
+  const { m1, m1_5: H, m2: G } = await (await fetch('golden/measurements.json')).json();
   const f = m1.fuzz, c = m1.fuzzCentral, s = m1.secondOrder, t = m1.torch, B = m1.budgets;
   const rules = m1.sabotage.rules;
   const allCaught = rules.every((r) => r.caughtAfter !== null);
@@ -111,7 +113,107 @@ try {
   const setName = (k) => (k === 'all' ? 'all' : k === 'm1' ? 'milestone 1' : `milestone ${k.slice(1)} (v2 generator)`);
   const short = targeted.filter((r) => !met(r.after.corpus));
 
+  const KERNEL_OPS = {
+    neg: 'neg', exp: 'exp', log: 'log', relu: 'relu', tanh: 'tanh (argument clamped)', step: 'step (relu gradient)',
+    copy: 'stopGradient', add: 'add', sub: 'sub', mul: 'mul', div: 'div',
+    gather: 'broadcast, transpose, reshape', sum: 'sum(axis)', max: 'max(axis), inside softmax',
+    'matmul-naive': 'matmul, one thread per output', 'matmul-tiled': `matmul, ${G.tile} x ${G.tile} tiles in workgroup memory`,
+  };
+  const power = G.recorded.power;
+  const gpuRate = (x) => (x.containing ? `${pct(x.caught, x.containing)} <span class="note">(${n(x.caught)} / ${n(x.containing)})</span>` : '&mdash;');
+  const outRate = (x) => (x.containing ? `${pct(x.caughtByOutputs, x.containing)}` : '&mdash;');
+  const bugs = G.sabotage.filter((x) => x.bug);
+  const reorder = G.sabotage.filter((x) => !x.bug);
+  const T = G.targets;
+
   let html = `
+  <h2>Milestone 2: every op lowered to WGSL, checked on a real GPU</h2>
+  <div class="wrap"><table class="claims">
+    <tr><th>claim</th><th>measured</th><th>checked against</th></tr>
+    <tr><td>Every kernel meets the float32 budget on adversarial inputs</td>
+      <td class="n ${G.direct.pass === G.direct.cases ? 'good' : 'bad'}">${G.direct.pass} of ${G.direct.cases} direct cases</td>
+      <td>the float64 interpreter, per element, budget derived from the WGSL specification; worst ratio ${sci(G.direct.worst)} of the budget.
+        <b>This is the correctness claim for each kernel.</b></td></tr>
+    <tr><td>Random programs agree, forward and gradient</td>
+      <td class="n ${G.fuzz.failed + G.fuzz.errors === 0 ? 'good' : 'bad'}">${n(G.fuzz.passed)} of ${n(G.fuzz.runs)} runs</td>
+      <td>${n(G.fuzz.programs)} programs from generator v2 in float32 mode, ${n(G.fuzz.skipped)} skipped; every node compared, worst ratio
+        ${sci(G.fuzz.worst)}. <b>Supporting evidence</b>, not the claim.</td></tr>
+    <tr><td>The direct tests catch every injected kernel bug</td>
+      <td class="n ${T.directCatchesEveryBug ? 'good' : 'bad'}">${bugs.filter((x) => x.direct.caught > 0).length} of ${bugs.length}</td>
+      <td>target stated in advance: all of them</td></tr>
+    <tr><td>A correct change of summation order is not flagged</td>
+      <td class="n ${T.reorderFlagged ? 'bad' : 'good'}">${T.reorderFlagged ? 'flagged' : 'not flagged'}</td>
+      <td>shows the budget is not so tight it rejects legitimate float32 results</td></tr>
+  </table></div>
+  <p class="note">Recorded on ${esc(G.adapter.vendor)} ${esc(G.adapter.architecture)}${G.adapter.description ? ` (${esc(G.adapter.description)})` : ''},
+  ${esc(G.adapter.userAgent.match(/Chrome\/[\d.]+/)?.[0] ?? 'browser')}, at ${esc(G.recorded.at)}. Power mode: <b>${esc(power.activeMode)}</b>,
+  ${power.onAC ? 'on AC' : 'on battery'}. Nothing in this milestone is timed; the power mode is recorded anyway.</p>
+
+  <h3>The float32 budget</h3>
+  <p>Per element, <code>abs(gpu &minus; ref) &le; S &middot; E</code>, where <code>ref</code> is the float64 interpreter on
+  the same float32-rounded inputs and <code>E</code> a first-order error bound propagated node by node from the
+  WGSL specification's stated accuracy for each op: correctly rounded add, sub and mul; division to ${G.budget.divisionUlp} ULP;
+  exp, log and tanh to the specification's figures; <code>&gamma;<sub>n</sub> &middot; &Sigma;|terms|</code> for sums and matmul
+  in any order; exact data movement and max; and flush-to-zero allowed below the smallest normal.
+  Constants: S = ${G.budget.safetyFactor}, u = ${sci(G.budget.unitRoundoff)}, ULP factor ${sci(G.budget.ulpFactor)},
+  smallest normal ${sci(G.budget.smallestNormal)}. Fixed before any GPU ran; the derivation is in DESIGN.md, under &ldquo;The float32 budget&rdquo;.
+  The exact-zero case (<code>x0 / x0</code>) needs no special rule: its bound comes from the terms that cancel.</p>
+
+  <h3>Kernels, one per op, no fusion</h3>
+  <div class="wrap"><table>
+    <tr><th>kernel</th><th>serves</th><th>direct cases passing</th></tr>
+    ${G.kernels.map((k) => { const b = G.direct.byKernel[k] ?? { cases: 0, pass: 0 }; return `<tr><td><code>${esc(k)}</code></td><td>${esc(KERNEL_OPS[k] ?? k)}</td>
+      <td class="n ${b.pass === b.cases ? 'good' : 'bad'}">${b.pass} / ${b.cases}</td></tr>`; }).join('')}
+    <tr><td>composite</td><td>softmax, log-softmax (the decomposition, one kernel per op)</td>
+      <td class="n ${G.direct.byKernel.composite?.pass === G.direct.byKernel.composite?.cases ? 'good' : 'bad'}">${G.direct.byKernel.composite?.pass ?? 0} / ${G.direct.byKernel.composite?.cases ?? 0}</td></tr>
+  </table></div>
+  <p class="note">Direct cases cover, where the op accepts them: sizes that are not multiples of the workgroup
+  or tile, size-1 dimensions, rank 3 and 4, very large and very small magnitudes, subnormals, exact zeros,
+  and reductions long enough to stress accumulation. Every buffer is padded with a canary that is checked
+  afterwards, so a write past the end is caught even where WebGPU would quietly drop it.</p>
+
+  <h3>Injected kernel bugs</h3>
+  <p>Each bug injected alone. The direct tests run first, so a bug they catch is caught there first.
+  Fuzzer rates are the fraction of programs using the affected kernel that catch it, split by source,
+  with no target set; the general-program rate is the unbiased one. &ldquo;Outputs only&rdquo; is what the rate
+  would be if only program outputs were compared, not every node.</p>
+  <div class="wrap"><table>
+    <tr><th>bug</th><th>direct cases catching</th><th>caught first by</th><th>fuzzer: general</th><th>targeted</th><th>outputs only (general)</th><th>first fuzz catch</th></tr>
+    ${G.sabotage.map((x) => `<tr><td>${esc(x.label)}${x.bug ? '' : ' <span class="note">(not a bug)</span>'}</td>
+      <td class="n ${x.bug ? (x.direct.caught > 0 ? 'good' : 'bad') : (x.direct.caught === 0 ? 'good' : 'bad')}">${x.direct.caught} / ${x.direct.cases}</td>
+      <td>${esc(x.caughtFirstBy)}</td>
+      <td class="n ${x.bug && x.fuzz.firstCatch === null ? 'warn' : ''}">${gpuRate(x.fuzz.general)}</td>
+      <td class="n">${gpuRate(x.fuzz.targeted)}</td>
+      <td class="n">${outRate(x.fuzz.general)}</td>
+      <td class="n">${x.fuzz.firstCatch === null ? (x.bug ? '<span class="warn">never</span>' : 'never') : `program ${n(x.fuzz.firstCatch)}`}</td></tr>`).join('')}
+  </table></div>
+  <p>${T.bugsMissedByDirect.length ? `<b>Missed by the direct tests:</b> ${T.bugsMissedByDirect.map(esc).join(', ')}. ` : ''}
+  ${T.bugsMissedByFuzzer.length ? `<b>Missed by the fuzzer entirely:</b> ${T.bugsMissedByFuzzer.map((x) => `<code>${esc(x)}</code>`).join(', ')}.
+  The fuzzer runs with buffers exactly the size of each tensor, as a real program would, and there an
+  out-of-bounds write by the last workgroup changes nothing any comparison can see; only the direct tests'
+  canaries show it. ` : ''}
+  ${(() => { const sm = G.sabotage.find((x) => x.name === 'softmax-no-max'); return sm ? `The dropped softmax shift is caught at the node that should hold
+  <code>x &minus; max(x)</code>, in ${gpuRate(sm.fuzz.general)} of general programs, but by program outputs alone in
+  ${outRate(sm.fuzz.general)}: softmax is invariant to the shift, so its outputs stay right unless the logits are large
+  enough to overflow float32, which the generator's bounded values do not reach. Comparing every node, not just
+  outputs (as the float32 budget in DESIGN.md specifies), is what catches it.` : ''; })()}</p>
+
+  <h3>What went against me in this milestone</h3>
+  <p><b>tanh returned NaN on this adapter, and my own derivation had missed that the specification allows it.</b>
+  The first GPU run passed ${G.firstRun.pass} of ${G.firstRun.cases} direct cases: ${G.firstRun.failures.map((x) => `<code>${esc(x.name)}</code>`).join(', ')}
+  returned NaN where the answer is ${G.firstRun.failures.map((x) => sci(x.first.ref)).join(', ')}. The builtin is accurate until
+  exp overflows float32 and NaN beyond (the threshold is in DESIGN.md revision R2); the specification's tanh inherits
+  sinh/cosh's overflow, so that is permitted, and the first-order bound I derived before the run assumed exp stays finite.
+  The kernel now clamps its argument to &plusmn;20, where tanh is exactly &plusmn;1 in float32. The budget did not
+  change. The failing run is kept (<code>golden/gpu-m2-run1-direct.json</code>) and logged as DESIGN.md revision R2.</p>
+  <p><b>My first softmax sabotage was in the wrong place.</b> It made the max kernel return zero, which is caught at
+  the max node itself rather than as a missing subtraction. It now drops the subtraction in the lowering and
+  leaves max correct.</p>
+  <p><b>Mistakes in my own tests, caught before any GPU ran:</b> a relu-flip test on a value its rounding error
+  could not reach, a judge test that perturbed a number by less than float64 can represent, and a generator
+  test that held softmax's internal exps to a guard meant for the generator's own. And the generator's
+  float32 guard changed none of the corpus programs the fuzzer ran; it is kept, and DESIGN.md says so.</p>
+
   <h2>Milestone 1.5: hardening, before any GPU work</h2>
   <div class="wrap"><table class="claims">
     <tr><th>change</th><th>before</th><th>after</th></tr>
@@ -305,7 +407,7 @@ try {
     <tr><th>milestone</th><th>what</th><th>status</th></tr>
     <tr><td>1</td><td>tensor IR, autodiff, float64 reference, fuzzed and checked against PyTorch</td><td class="good">done</td></tr>
     <tr><td>1.5</td><td>hardening: metric v2, generator v2, detection rates</td><td class="good">done</td></tr>
-    <tr><td>2</td><td>lowering to WGSL kernels, fuzzed against this interpreter under the float32 budget in DESIGN.md</td><td>not started</td></tr>
+    <tr><td>2</td><td>every op lowered to WGSL, checked on a real GPU under the float32 budget; correctness only</td><td class="good">done</td></tr>
     <tr><td>3</td><td>train an MLP, then a small transformer, in the browser; loss curves against PyTorch</td><td>not started</td></tr>
     <tr><td>4</td><td>fusion and autotuning, timed against the hand-written kernels of llm-inference-webgpu</td><td>not started</td></tr>
   </table></div>`;

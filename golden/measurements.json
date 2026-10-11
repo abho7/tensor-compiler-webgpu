@@ -1978,5 +1978,468 @@
     ]
    }
   }
+ },
+ "m2": {
+  "producedBy": "web/gpu.html, summarised by node tools/measure.js",
+  "recorded": {
+   "at": "2026-10-11T20:20:51.655Z",
+   "power": {
+    "platform": "win32",
+    "ActiveOverlayAcPowerScheme": {
+     "guid": "961cc777-2547-4f9d-8174-7d86181b8a7a",
+     "name": "Best power efficiency"
+    },
+    "ActiveOverlayDcPowerScheme": {
+     "guid": "00000000-0000-0000-0000-000000000000",
+     "name": "Balanced"
+    },
+    "batteryStatus": "2",
+    "onAC": true,
+    "activeMode": "Best power efficiency"
+   }
+  },
+  "adapter": {
+   "vendor": "intel",
+   "architecture": "gen-12lp",
+   "device": "",
+   "description": "",
+   "features": [
+    "bgra8unorm-storage",
+    "clip-distances",
+    "core-features-and-limits",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "primitive-index",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "subgroup-size-control",
+    "subgroups",
+    "texture-component-swizzle",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "texture-formats-tier1",
+    "texture-formats-tier2",
+    "timestamp-query"
+   ],
+   "limits": {
+    "maxStorageBufferBindingSize": 2147483644,
+    "maxComputeWorkgroupsPerDimension": 65535
+   },
+   "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "sourceHash": "dd729b77",
+  "budget": {
+   "safetyFactor": 2,
+   "unitRoundoff": 5.960464477539063e-8,
+   "ulpFactor": 1.1920928955078125e-7,
+   "smallestNormal": 1.1754943508222875e-38,
+   "divisionUlp": 2.5
+  },
+  "tile": 16,
+  "workgroup": 64,
+  "kernels": [
+   "neg",
+   "exp",
+   "log",
+   "relu",
+   "tanh",
+   "step",
+   "copy",
+   "add",
+   "sub",
+   "mul",
+   "div",
+   "gather",
+   "sum",
+   "max",
+   "matmul-naive",
+   "matmul-tiled"
+  ],
+  "direct": {
+   "cases": 252,
+   "pass": 252,
+   "worst": 0.5,
+   "byKernel": {
+    "neg": {
+     "cases": 12,
+     "pass": 12
+    },
+    "exp": {
+     "cases": 11,
+     "pass": 11
+    },
+    "log": {
+     "cases": 11,
+     "pass": 11
+    },
+    "relu": {
+     "cases": 12,
+     "pass": 12
+    },
+    "tanh": {
+     "cases": 12,
+     "pass": 12
+    },
+    "step": {
+     "cases": 12,
+     "pass": 12
+    },
+    "copy": {
+     "cases": 12,
+     "pass": 12
+    },
+    "add": {
+     "cases": 12,
+     "pass": 12
+    },
+    "sub": {
+     "cases": 11,
+     "pass": 11
+    },
+    "mul": {
+     "cases": 11,
+     "pass": 11
+    },
+    "div": {
+     "cases": 11,
+     "pass": 11
+    },
+    "sum": {
+     "cases": 14,
+     "pass": 14
+    },
+    "max": {
+     "cases": 14,
+     "pass": 14
+    },
+    "gather": {
+     "cases": 57,
+     "pass": 57
+    },
+    "matmul-naive": {
+     "cases": 13,
+     "pass": 13
+    },
+    "matmul-tiled": {
+     "cases": 13,
+     "pass": 13
+    },
+    "composite": {
+     "cases": 14,
+     "pass": 14
+    }
+   },
+   "failures": []
+  },
+  "firstRun": {
+   "recorded": {
+    "at": "2026-10-11T20:10:56.166Z",
+    "power": {
+     "platform": "win32",
+     "ActiveOverlayAcPowerScheme": {
+      "guid": "961cc777-2547-4f9d-8174-7d86181b8a7a",
+      "name": "Best power efficiency"
+     },
+     "ActiveOverlayDcPowerScheme": {
+      "guid": "00000000-0000-0000-0000-000000000000",
+      "name": "Balanced"
+     },
+     "batteryStatus": "2",
+     "onAC": true,
+     "activeMode": "Best power efficiency"
+    }
+   },
+   "sourceHash": "d5774571",
+   "cases": 252,
+   "pass": 251,
+   "failures": [
+    {
+     "name": "tanh large [1000]",
+     "first": {
+      "node": 1,
+      "op": "tanh",
+      "index": 0,
+      "gpu": null,
+      "ref": -1,
+      "bound": 0.00016956831677816808,
+      "ratio": null
+     }
+    }
+   ],
+   "note": "First GPU run of milestone 2: direct tests only, before the tanh kernel clamped its argument. Kept as the record of the tanh NaN finding."
+  },
+  "fuzz": {
+   "programs": 2000,
+   "skipped": 0,
+   "runs": 5318,
+   "passed": 5318,
+   "failed": 0,
+   "errors": 0,
+   "worst": 0.499897888299036,
+   "bySource": {
+    "general": {
+     "programs": 1000,
+     "skipped": 0
+    },
+    "targeted": {
+     "programs": 1000,
+     "skipped": 0
+    }
+   },
+   "opsChecked": {
+    "input": 2000,
+    "relu": 504,
+    "sub": 1718,
+    "tanh": 1335,
+    "mul": 1857,
+    "const": 1754,
+    "add": 1128,
+    "log": 451,
+    "max": 409,
+    "stopGradient": 409,
+    "broadcast": 1779,
+    "exp": 873,
+    "sum": 1318,
+    "neg": 828,
+    "div": 701,
+    "step": 491,
+    "transpose": 1035,
+    "reshape": 995,
+    "matmul": 659
+   },
+   "failures": [],
+   "failureCount": 0
+  },
+  "sabotage": [
+   {
+    "name": "tiled-off-by-one",
+    "label": "tiled matmul: off-by-one at the tile edge",
+    "bug": true,
+    "direct": {
+     "cases": 252,
+     "caught": 8,
+     "first": "matmul tiled [1,1] x [1,1]",
+     "firstHow": "values"
+    },
+    "fuzz": {
+     "general": {
+      "containing": 459,
+      "caught": 124,
+      "caughtByOutputs": 110
+     },
+     "targeted": {
+      "containing": 200,
+      "caught": 83,
+      "caughtByOutputs": 83
+     },
+     "firstCatch": 20,
+     "firstCatchSource": "targeted",
+     "skipped": 0
+    },
+    "caughtFirstBy": "direct: matmul tiled [1,1] x [1,1]"
+   },
+   {
+    "name": "transpose-swapped-stride",
+    "label": "transpose: the last two source strides swapped",
+    "bug": true,
+    "direct": {
+     "cases": 252,
+     "caught": 24,
+     "first": "transpose [65,3] -> [3,65]",
+     "firstHow": "values"
+    },
+    "fuzz": {
+     "general": {
+      "containing": 635,
+      "caught": 564,
+      "caughtByOutputs": 513
+     },
+     "targeted": {
+      "containing": 400,
+      "caught": 400,
+      "caughtByOutputs": 397
+     },
+     "firstCatch": 2,
+     "firstCatchSource": "targeted",
+     "skipped": 0
+    },
+    "caughtFirstBy": "direct: transpose [65,3] -> [3,65]"
+   },
+   {
+    "name": "elementwise-no-bounds-check",
+    "label": "elementwise: no bounds check in the last workgroup",
+    "bug": true,
+    "direct": {
+     "cases": 252,
+     "caught": 119,
+     "first": "neg [1]",
+     "firstHow": "canary"
+    },
+    "fuzz": {
+     "general": {
+      "containing": 993,
+      "caught": 0,
+      "caughtByOutputs": 0
+     },
+     "targeted": {
+      "containing": 961,
+      "caught": 0,
+      "caughtByOutputs": 0
+     },
+     "firstCatch": null,
+     "firstCatchSource": null,
+     "skipped": 0
+    },
+    "caughtFirstBy": "direct: neg [1]"
+   },
+   {
+    "name": "broadcast-wrong-stride",
+    "label": "broadcast: a stretched axis reads with its natural stride, not 0",
+    "bug": true,
+    "direct": {
+     "cases": 252,
+     "caught": 24,
+     "first": "broadcast [1] -> [100003]",
+     "firstHow": "values"
+    },
+    "fuzz": {
+     "general": {
+      "containing": 819,
+      "caught": 637,
+      "caughtByOutputs": 628
+     },
+     "targeted": {
+      "containing": 960,
+      "caught": 464,
+      "caughtByOutputs": 464
+     },
+     "firstCatch": 1,
+     "firstCatchSource": "general",
+     "skipped": 0
+    },
+    "caughtFirstBy": "direct: broadcast [1] -> [100003]"
+   },
+   {
+    "name": "sum-off-by-one",
+    "label": "sum(axis): reduction extent one short",
+    "bug": true,
+    "direct": {
+     "cases": 252,
+     "caught": 21,
+     "first": "sum [1] axis 0",
+     "firstHow": "values"
+    },
+    "fuzz": {
+     "general": {
+      "containing": 799,
+      "caught": 787,
+      "caughtByOutputs": 768
+     },
+     "targeted": {
+      "containing": 519,
+      "caught": 519,
+      "caughtByOutputs": 517
+     },
+     "firstCatch": 1,
+     "firstCatchSource": "general",
+     "skipped": 0
+    },
+    "caughtFirstBy": "direct: sum [1] axis 0"
+   },
+   {
+    "name": "reshape-stride-mismatch",
+    "label": "reshape: the source's strides used for the output's axes",
+    "bug": true,
+    "direct": {
+     "cases": 252,
+     "caught": 12,
+     "first": "reshape [6,5] -> [5,6]",
+     "firstHow": "values"
+    },
+    "fuzz": {
+     "general": {
+      "containing": 628,
+      "caught": 341,
+      "caughtByOutputs": 323
+     },
+     "targeted": {
+      "containing": 367,
+      "caught": 285,
+      "caughtByOutputs": 285
+     },
+     "firstCatch": 5,
+     "firstCatchSource": "general",
+     "skipped": 0
+    },
+    "caughtFirstBy": "direct: reshape [6,5] -> [5,6]"
+   },
+   {
+    "name": "softmax-no-max",
+    "label": "softmax: the maximum never subtracted",
+    "bug": true,
+    "direct": {
+     "cases": 252,
+     "caught": 12,
+     "first": "softmax [3,65] axis 1",
+     "firstHow": "values"
+    },
+    "fuzz": {
+     "general": {
+      "containing": 369,
+      "caught": 365,
+      "caughtByOutputs": 0
+     },
+     "targeted": {
+      "containing": 40,
+      "caught": 40,
+      "caughtByOutputs": 0
+     },
+     "firstCatch": 1,
+     "firstCatchSource": "general",
+     "skipped": 0
+    },
+    "caughtFirstBy": "direct: softmax [3,65] axis 1"
+   },
+   {
+    "name": "matmul-reorder",
+    "label": "matmul: accumulation in reverse order (mathematically correct)",
+    "bug": false,
+    "direct": {
+     "cases": 252,
+     "caught": 0,
+     "first": null,
+     "firstHow": null
+    },
+    "fuzz": {
+     "general": {
+      "containing": 459,
+      "caught": 0,
+      "caughtByOutputs": 0
+     },
+     "targeted": {
+      "containing": 200,
+      "caught": 0,
+      "caughtByOutputs": 0
+     },
+     "firstCatch": null,
+     "firstCatchSource": null,
+     "skipped": 0
+    },
+    "caughtFirstBy": "nothing"
+   }
+  ],
+  "targets": {
+   "directCatchesEveryBug": true,
+   "bugsMissedByDirect": [],
+   "bugsMissedByFuzzer": [
+    "elementwise-no-bounds-check"
+   ],
+   "reorderFlagged": false,
+   "unexplainedFuzzFailures": 0
+  }
  }
 }
