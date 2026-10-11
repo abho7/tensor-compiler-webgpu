@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Out-of-bounds read probe</title>
+<style>
+  :root { --ink: #16171b; --dim: #5c6068; --bg: #fbfbfc; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e7e9ee; --dim: #9aa1ab; --bg: #131418; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 ui-monospace, Consolas, monospace; }
+  main { max-width: 56rem; margin: 0 auto; padding: 2rem 1rem; }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <h1>What does an out-of-bounds storage read return on this adapter?</h1>
+  <p>One kernel, <code>OUT[i] = A[IDX[i]]</code>, with indices supplied at run time so the
+  compiler cannot see they are out of range. WebGPU only promises that such a read returns
+  some value without faulting (zero, or a value from somewhere in the binding); this page
+  records which, on this adapter only. <code>?record=0</code> skips saving.</p>
+  <pre id="out">running&hellip;</pre>
+</main>
+<script type="module">
+import { GpuRunner } from '../src/gpu/runtime.js';
+
+const SHADER = `@group(0) @binding(0) var<storage, read> A: array<f32>;
+@group(0) @binding(1) var<storage, read_write> OUT: array<f32>;
+@group(0) @binding(2) var<storage, read> IDX: array<u32>;
+@compute @workgroup_size(1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  OUT[g.x] = A[IDX[g.x]];
+}
+`;
+const INDICES = [0, 1, 2, 3, 4, 5, 7, 8, 64, 1000, 1000000];
+
+// Two bindings of A: a buffer exactly four floats long, and a four-float
+// window at offset 256 into a larger buffer whose other floats are sentinels,
+// to tell "clamped to the binding" from "read the underlying buffer".
+const CASES = [
+  { name: 'exact buffer of 4 floats', values: [1, 2, 3, 4], window: null },
+  { name: '4-float window at offset 256 of a 1024-float buffer', values: [1, 2, 3, 4], window: { offsetFloats: 64, totalFloats: 1024, sentinel: -7 } },
+];
+
+const out = document.getElementById('out');
+try {
+  const runner = await GpuRunner.create();
+  const device = runner.device;
+  const module = device.createShaderModule({ code: SHADER });
+  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+  const results = [];
+  for (const c of CASES) {
+    const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+    let a, binding;
+    if (c.window) {
+      const full = new Float32Array(c.window.totalFloats).fill(c.window.sentinel);
+      full.set(c.values, c.window.offsetFloats);
+      a = device.createBuffer({ size: full.byteLength, usage });
+      device.queue.writeBuffer(a, 0, full);
+      binding = { buffer: a, offset: c.window.offsetFloats * 4, size: c.values.length * 4 };
+    } else {
+      a = device.createBuffer({ size: c.values.length * 4, usage });
+      device.queue.writeBuffer(a, 0, new Float32Array(c.values));
+      binding = { buffer: a };
+    }
+    const idx = device.createBuffer({ size: INDICES.length * 4, usage });
+    device.queue.writeBuffer(idx, 0, new Uint32Array(INDICES));
+    const res = device.createBuffer({ size: INDICES.length * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const staging = device.createBuffer({ size: INDICES.length * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    device.pushErrorScope('validation');
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
+      { binding: 0, resource: binding }, { binding: 1, resource: { buffer: res } }, { binding: 2, resource: { buffer: idx } },
+    ] }));
+    pass.dispatchWorkgroups(INDICES.length);
+    pass.end();
+    enc.copyBufferToBuffer(res, 0, staging, 0, INDICES.length * 4);
+    device.queue.submit([enc.finish()]);
+    const err = await device.popErrorScope();
+    if (err) throw new Error(err.message);
+    await staging.mapAsync(GPUMapMode.READ);
+    const got = Array.from(new Float32Array(staging.getMappedRange()));
+    staging.unmap();
+    const reads = INDICES.map((index, k) => {
+      const value = got[k];
+      const inBounds = index < c.values.length;
+      const kind = inBounds ? (value === c.values[index] ? 'correct' : 'wrong') :
+        value === 0 ? 'zero' :
+        c.values.includes(value) ? `in-bounds value (A[${c.values.indexOf(value)}])` :
+        c.window && value === c.window.sentinel ? 'outside the binding (sentinel)' : 'other';
+      return { index, inBounds, value, kind };
+    });
+    results.push({ case: c.name, length: c.values.length, reads });
+    for (const a2 of [a, idx, res, staging]) a2.destroy();
+  }
+  const record = { probe: 'out-of-bounds storage read', shader: SHADER, indices: INDICES, adapter: runner.info(), results };
+  window.__result = record;
+  out.textContent = results.map((r) => `${r.case}:\n` + r.reads.map((x) => `  A[${x.index}] -> ${x.value}  (${x.kind})`).join('\n')).join('\n\n');
+  if (new URLSearchParams(location.search).get('record') !== '0') {
+    const saved = await (await fetch('/record/gpu-oob.json', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(record) })).json();
+    out.textContent += `\n\nrecorded: ${saved.saved}, power mode: ${saved.power?.activeMode}`;
+  }
+} catch (error) {
+  out.textContent = `error: ${error.message ?? error}`;
+  window.__error = String(error);
+}
+window.__done = true;
+</script>

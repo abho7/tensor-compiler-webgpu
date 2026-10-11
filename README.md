@@ -165,8 +165,25 @@ the terms that cancel.
   float32, which the specification permits and my derivation had not accounted for. The kernel now
   clamps its argument; the budget did not change; the failing run is kept in `golden/`.
 
-`web/gpu.html` runs all of it and saves the results through `tools/serve.js`; CI checks the
-recording came from the sources checked in.
+`web/gpu.html` runs all of it and saves the results through `tools/serve.js`.
+
+**What these results rest on.** CI has no GPU and cannot re-run the kernels: it checks that the
+recorded GPU results came from the sources checked in (a hash over every file that decides what
+the harness computes), recomputes everything that needs no GPU, and checks the report's figures
+against the recording. Any kernel change means running `web/gpu.html` again. And the generator's
+float32 guard changed none of the corpus programs, so the fuzzer never exercised float32 overflow
+or underflow: float32 range handling rests on the direct tests alone.
+
+**Follow-up.** On this adapter only, an out-of-bounds storage read returns zero (`web/oob.html`,
+recorded with the adapter in `golden/gpu-oob.json`). That explains both low detection rates,
+and replaying the fuzz runs through the kernel emulator with zero-valued out-of-bounds reads
+reproduces the GPU's counts exactly. The tile-edge off-by-one crosses the edge in every program
+that ran the tiled matmul (all 659 have an inner dimension off the 16-wide grid; 5 have a
+dimension over 16), but the extra row it reads is past the end of B unless the matmul is
+batched, so it is caught in exactly the 207 batched programs. The broadcast-stride bug only
+touches axes stretched from size 1, and 494 of 960 targeted programs only add leading axes,
+against 170 of 819 general ones; every stretching program it misses is explained (zero-valued
+tensors, or a change inside the budget). The generator was not retuned.
 
 ## Running it
 

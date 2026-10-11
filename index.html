@@ -95,7 +95,7 @@ const n = (v) => Number(v).toLocaleString('en-US');
 const pct = (a, b) => `${(100 * a / b).toFixed(1)}%`;
 
 try {
-  const { m1, m1_5: H, m2: G } = await (await fetch('golden/measurements.json')).json();
+  const { m1, m1_5: H, m2: G, m2_followup: FU } = await (await fetch('golden/measurements.json')).json();
   const f = m1.fuzz, c = m1.fuzzCentral, s = m1.secondOrder, t = m1.torch, B = m1.budgets;
   const rules = m1.sabotage.rules;
   const allCaught = rules.every((r) => r.caughtAfter !== null);
@@ -197,6 +197,44 @@ try {
   ${outRate(sm.fuzz.general)}: softmax is invariant to the shift, so its outputs stay right unless the logits are large
   enough to overflow float32, which the generator's bounded values do not reach. Comparing every node, not just
   outputs (as the float32 budget in DESIGN.md specifies), is what catches it.` : ''; })()}</p>
+
+  <h3>What these results rest on</h3>
+  <p><b>CI does not run the kernels.</b> It has no GPU. It checks that the recorded GPU results came from
+  exactly the sources checked in (a hash over every file that decides what the harness computes), that the
+  summary on this page is what the code makes of the recording, and everything that runs without a GPU:
+  codegen snapshots, the bounds, the emulator. A change to any kernel, and every GPU figure here, needs
+  <code>web/gpu.html</code> run again in a browser.</p>
+  <p><b>The generator's float32 guard changed none of the corpus programs</b>: its intervals already kept every
+  exp argument it emits in range. So the fuzzer never exercised float32 overflow or underflow, and the handling
+  of float32's range rests on the direct tests alone (their large and small magnitude cases).</p>
+
+  <h3>Follow-up: why two bugs were caught less often</h3>
+  ${(() => {
+    const oobLine = FU.oobProbe.cases.map((c) => `${esc(c.case)}: ${c.returnedZero} of ${c.outOfBounds} out-of-bounds reads returned zero`).join('; ');
+    const t = FU.tiledMatmul, sh = t.shapes, z = t.replay.byModel.zero, cl = t.replay.byModel.clamp;
+    const b = FU.broadcast, bs = b.shapes, bz = b.replay.byModel.zero, u = b.uncaughtStretching;
+    const both = (x) => `${n(x.general.caught)} / ${n(x.general.containing)} general, ${n(x.targeted.caught)} / ${n(x.targeted.containing)} targeted`;
+    return `
+  <p><b>What an out-of-bounds read returns, on this adapter only</b> (${esc(FU.oobProbe.adapter.vendor)} ${esc(FU.oobProbe.adapter.architecture)},
+  power mode ${esc(FU.oobProbe.recorded.power.activeMode)}): ${oobLine}. The window case reads a four-float binding inside a larger buffer and still
+  returns zero, not the neighbouring values. WebGPU allows either; other adapters may differ (<code>web/oob.html</code>).</p>
+  <p><b>The tile-edge off-by-one.</b> Of the ${n(sh.programs)} corpus programs that ran the tiled matmul, ${n(sh.anyDimNotMultipleOfTile)} have a
+  dimension that is not a multiple of the ${t.tile ?? FU.tile}-wide tile (in every one of them the inner dimension K, the one the bug is on),
+  and ${n(sh.anyDimLargerThanTile)} have a dimension larger than the tile (the largest is ${sh.maxDim}). So shape does not explain the rate:
+  the edge is crossed in every program. What does: the extra term the bug adds multiplies the next row of B, and for an unbatched matmul that
+  row is past the end of B, which reads as zero here. The bug is caught exactly in the ${n(sh.batched)} programs with a batched matmul,
+  program by program, none more and none fewer. Replaying every fuzz run through the kernel emulator with out-of-bounds reads as zero
+  gives ${both(z)}, the GPU's own counts exactly; with reads clamped to the last element it would have been ${both(cl)}.</p>
+  <p><b>The broadcast stride.</b> The bug only changes an axis that is stretched from size 1; a broadcast that only adds leading axes is
+  unaffected. ${n(bs.targeted.leadingOnly)} of ${n(bs.targeted.programs)} targeted programs (${pct(bs.targeted.leadingOnly, bs.targeted.programs)})
+  contain no stretched axis at all, against ${n(bs.general.leadingOnly)} of ${n(bs.general.programs)} general ones
+  (${pct(bs.general.leadingOnly, bs.general.programs)}): the targeted broadcast builder often only adds leading axes, and the general programs'
+  broadcasts mostly come from mixing shapes in arithmetic and from sum's gradient, which stretch. Among programs that do stretch an axis, the
+  rates are ${pct(bz.targeted.caught, bs.targeted.stretching)} targeted and ${pct(bz.general.caught, bs.general.stretching)} general. The
+  ${n(b.stretchingVsCaught.propertyButNotCaught.length)} stretching programs not caught are all explained: ${n(u.allZeroSource.length)} stretch
+  only all-zero tensors, so the wrong element is zero too, and ${n(u.withinBudget.length)} change values by less than the float32 budget
+  allows at that node. The replay reproduces the GPU counts here too (${both(bz)}). The generator was not changed.</p>`;
+  })()}
 
   <h3>What went against me in this milestone</h3>
   <p><b>tanh returned NaN on this adapter, and my own derivation had missed that the specification allows it.</b>

@@ -78,6 +78,19 @@ test("the README's milestone 2 figures match golden/measurements.json", () => {
   assert.equal(g.tile, 16);
 });
 
+test("the README's milestone 2 follow-up figures match golden/measurements.json", () => {
+  const f = JSON.parse(text('../golden/measurements.json')).m2_followup;
+  const s = f.tiledMatmul.shapes, b = f.broadcast.shapes;
+  assert.match(readme, new RegExp(`all ${s.programs} have an inner dimension off the ${f.tile}-wide grid; ${s.anyDimLargerThanTile} have a\\s+dimension over ${f.tile}`));
+  assert.equal(s.kNotMultipleOfTile, s.programs);
+  assert.match(readme, new RegExp(`caught in exactly the ${s.batched} batched programs`));
+  assert.match(readme, new RegExp(`${b.targeted.leadingOnly} of ${b.targeted.programs} targeted programs only add leading axes,\\s+against ${b.general.leadingOnly} of ${b.general.programs} general ones`));
+  assert.deepEqual(f.broadcast.uncaughtStretching.other, []);
+  assert.ok(f.oobProbe.cases.every((c) => c.returnedZero === c.outOfBounds), 'the README says out-of-bounds reads return zero');
+  assert.match(readme, /CI has no GPU and cannot re-run the kernels/);
+  assert.match(readme, /float32 guard changed none of the corpus programs/);
+});
+
 test('the report page types in no measured number', () => {
   // Every figure comes from measurements.json. The page's own numerals are
   // limited to fixed context: milestone numbers, 10⁴, 20 draws, logits near 800.

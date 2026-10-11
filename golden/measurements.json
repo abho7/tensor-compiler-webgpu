@@ -2441,5 +2441,219 @@
    "reorderFlagged": false,
    "unexplainedFuzzFailures": 0
   }
+ },
+ "m2_followup": {
+  "producedBy": "node tools/measure.js (src/testing/analyze-m2.js)",
+  "tile": 16,
+  "tiledMatmul": {
+   "shapes": {
+    "programs": 659,
+    "anyDimNotMultipleOfTile": 659,
+    "anyDimLargerThanTile": 5,
+    "kNotMultipleOfTile": 659,
+    "kLargerThanTile": 5,
+    "batched": 207,
+    "unbatchedOnly": 452,
+    "maxDim": 24,
+    "bySource": {
+     "general": {
+      "programs": 459,
+      "batched": 124
+     },
+     "targeted": {
+      "programs": 200,
+      "batched": 83
+     }
+    }
+   },
+   "replay": {
+    "byModel": {
+     "zero": {
+      "general": {
+       "containing": 459,
+       "caught": 124
+      },
+      "targeted": {
+       "containing": 200,
+       "caught": 83
+      }
+     },
+     "clamp": {
+      "general": {
+       "containing": 459,
+       "caught": 459
+      },
+      "targeted": {
+       "containing": 200,
+       "caught": 200
+      }
+     }
+    },
+    "control": {
+     "runs": 1318,
+     "failing": 0
+    }
+   },
+   "batchedVsCaught": {
+    "caughtWithoutProperty": [],
+    "propertyButNotCaught": []
+   }
+  },
+  "broadcast": {
+   "shapes": {
+    "general": {
+     "programs": 819,
+     "stretching": 649,
+     "leadingOnly": 170
+    },
+    "targeted": {
+     "programs": 960,
+     "stretching": 466,
+     "leadingOnly": 494
+    }
+   },
+   "replay": {
+    "byModel": {
+     "zero": {
+      "general": {
+       "containing": 819,
+       "caught": 637
+      },
+      "targeted": {
+       "containing": 960,
+       "caught": 464
+      }
+     },
+     "clamp": {
+      "general": {
+       "containing": 819,
+       "caught": 457
+      },
+      "targeted": {
+       "containing": 960,
+       "caught": 381
+      }
+     }
+    },
+    "control": {
+     "runs": 4646,
+     "failing": 0
+    }
+   },
+   "stretchingVsCaught": {
+    "caughtWithoutProperty": [],
+    "propertyButNotCaught": [
+     3,
+     55,
+     99,
+     527,
+     669,
+     803,
+     825,
+     949,
+     1118,
+     1171,
+     1221,
+     1258,
+     1791,
+     1793
+    ]
+   },
+   "uncaughtStretching": {
+    "allZeroSource": [
+     3,
+     55,
+     99,
+     669,
+     803,
+     825,
+     949,
+     1118,
+     1171,
+     1791,
+     1793
+    ],
+    "withinBudget": [
+     527,
+     1221,
+     1258
+    ],
+    "other": []
+   }
+  },
+  "oobProbe": {
+   "adapter": {
+    "vendor": "intel",
+    "architecture": "gen-12lp",
+    "device": "",
+    "description": "",
+    "features": [
+     "bgra8unorm-storage",
+     "clip-distances",
+     "core-features-and-limits",
+     "depth-clip-control",
+     "depth32float-stencil8",
+     "dual-source-blending",
+     "float32-blendable",
+     "float32-filterable",
+     "indirect-first-instance",
+     "primitive-index",
+     "rg11b10ufloat-renderable",
+     "shader-f16",
+     "subgroup-size-control",
+     "subgroups",
+     "texture-component-swizzle",
+     "texture-compression-bc",
+     "texture-compression-bc-sliced-3d",
+     "texture-formats-tier1",
+     "texture-formats-tier2",
+     "timestamp-query"
+    ],
+    "limits": {
+     "maxStorageBufferBindingSize": 2147483644,
+     "maxComputeWorkgroupsPerDimension": 65535
+    },
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+   },
+   "recorded": {
+    "at": "2026-10-11T20:48:30.078Z",
+    "power": {
+     "platform": "win32",
+     "ActiveOverlayAcPowerScheme": {
+      "guid": "961cc777-2547-4f9d-8174-7d86181b8a7a",
+      "name": "Best power efficiency"
+     },
+     "ActiveOverlayDcPowerScheme": {
+      "guid": "00000000-0000-0000-0000-000000000000",
+      "name": "Balanced"
+     },
+     "batteryStatus": "2",
+     "onAC": true,
+     "activeMode": "Best power efficiency"
+    }
+   },
+   "cases": [
+    {
+     "case": "exact buffer of 4 floats",
+     "outOfBounds": 7,
+     "returnedZero": 7,
+     "inBoundsCorrect": 4,
+     "inBounds": 4,
+     "kinds": [
+      "zero"
+     ]
+    },
+    {
+     "case": "4-float window at offset 256 of a 1024-float buffer",
+     "outOfBounds": 7,
+     "returnedZero": 7,
+     "inBoundsCorrect": 4,
+     "inBounds": 4,
+     "kinds": [
+      "zero"
+     ]
+    }
+   ]
+  }
  }
 }
