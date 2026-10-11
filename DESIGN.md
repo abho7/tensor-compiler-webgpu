@@ -279,6 +279,130 @@ constants were set before any case was scored under it.
    targeted) was fixed before the final measurement and not changed to reach
    the 50% target.
 
+### Milestone 2 preconditions (2026-10-11), committed before the first GPU comparison
+
+Milestone 2 lowers every op to WGSL, one kernel per op, and compares the GPU
+(float32) with the interpreter (float64). Correctness only: nothing is timed.
+Everything below was written, and the per-op accuracies checked against the
+WGSL specification's own table (W3C Candidate Recommendation, section 15.7.4,
+read 2026-10-11), before any kernel ran on a GPU.
+
+7. **Revision R1: the tanh budget in the M2 table above was wrong.** It says
+   absolute `2^-20`. The specification says tanh's f32 accuracy is "the worse
+   of: absolute error 1.0×10^-5, inherited from sinh(x) / cosh(x)", which is
+   about ten times looser at small x. Before: `2^-20`. After: the
+   specification's bound, derived in amendment 8. Corrected before any
+   measurement; the table above is left as written so the mistake stays visible.
+
+8. **The float32 budget (metric v2 for float32).** Every comparison is per
+   element: `abs(gpu - ref) <= S · E`, where `ref` is the float64 interpreter's
+   value and `E` a first-order bound on the float32 error, propagated node by
+   node through the program alongside the reference. `S = 2` is the safety
+   factor: it covers the second-order terms dropped below and the bounds being
+   evaluated at reference rather than exact values. It was fixed here, not
+   fitted to any observed error.
+
+   Constants: `u = 2^-24` (unit roundoff); `ε = 2^-23`, so `ULP(v) <= ε·|v|` for
+   any normal v (the specification's definition of ULP); `τ = 2^-126`, the
+   smallest normal float32, because the specification lets every input and
+   output of these operations be flushed to zero when subnormal;
+   `γ_n = n·u / (1 - n·u)`.
+
+   Each node's bound is what it inherits from its operands' bounds (`e_a`,
+   `e_b`, `e_x`) plus its own error, plus `ftz(r) = τ` when `|r| < τ` (it may
+   have been flushed) and 0 otherwise:
+
+   | op | inherited | own (from the specification) |
+   |---|---|---|
+   | input, const | 0 (both sides start from the same float32 value) | ftz |
+   | add, sub | `e_a + e_b` | `u·|r|` (correctly rounded) |
+   | mul | `|b|·e_a + |a|·e_b + e_a·e_b` | `u·|r|` |
+   | div | `(e_a + |r|·e_b) / (|b| - e_b)`; unbounded if `e_b >= |b|` or `|b|` outside [2^-126, 2^126] | `2.5·ε·|r|` |
+   | neg, relu, stopGradient | `e_x` | 0 |
+   | exp | `|r|·(e^(e_x) - 1)` | `(3 + 2·(|x| + e_x))·ε·|r|·e^(e_x)` |
+   | log | `-log(1 - e_x / x)`; unbounded if `e_x >= x` | `max(2^-21, 3·ε·(|r| + inherited))`: the worse of the two cases, since x may straddle [0.5, 2] |
+   | tanh | `e_x` (`|tanh'| <= 1`) | `max(1e-5, (9.5 + 4·(|x| + e_x))·ε)`, below |
+   | step | 1 if `0 < |x| <= e_x` (the sign may flip), else 0 | 0 |
+   | max over n | `max_i e_i` (max is 1-Lipschitz in the largest-error norm) | 0 (correctly rounded, so exact) |
+   | sum over n | `Σ e_i` | `γ_n · Σ |x_i|` |
+   | matmul, inner size K | `Σ_k (|a_ik|·e_b,kj + |b_kj|·e_a,ik + e_a,ik·e_b,kj)` | `γ_K · Σ_k |a_ik·b_kj|` |
+   | broadcast, reshape, transpose | the source element's bound | 0 (data movement is exact) |
+
+   The sum and matmul bounds hold for any summation order, so they also cover
+   the specification's permission to reassociate, and an FMA, which it allows
+   only where at least as accurate.
+
+   tanh, inherited from `sinh(x)/cosh(x)` with `sinh = (exp(x) - exp(-x))·0.5`
+   and `cosh = (exp(x) + exp(-x))·0.5`: each exp carries
+   `(3 + 2|x|)·ε` relative error, the sum and difference `u` each, the halving
+   is exact, the final division `2.5·ε`. Relative to `cosh`, the numerator's
+   error is at most `(3 + 2|x|)·ε + u·|t|` and the denominator's
+   `(3 + 2|x|)·ε + u`, so with `|t| <= 1`:
+   `|Δt| <= 2·(3 + 2|x|)·ε + 2u + 2.5·ε ≈ (9.5 + 4|x|)·ε` to first order. The
+   specification takes the worse of that and `1e-5`; the `1e-5` dominates for
+   `|x|` below about 18.6.
+
+   For a single op on exact inputs, `E` reduces to the per-op class budget, so
+   the direct tests use these constants: correctly rounded ops `2·u·|r|`; div
+   `2·2.5·ε·|r|`; exp `2·(3 + 2|x|)·ε·|r|`; log `2·max(2^-21, 3·ε·|r|)`; tanh
+   `2·max(1e-5, (9.5 + 4|x|)·ε)`; sum `2·γ_n·Σ|x_i|`; matmul `2·γ_K·Σ|a·b|`;
+   data movement, max, neg, relu and step exact. Each also allows `2·τ` where
+   a subnormal may flush.
+
+   A whole program is judged on every node, not only its outputs, so a failure
+   names the first kernel that went wrong.
+
+   Why not the M1.5 form, `atol + rtol·|ref|` with `atol` set by the tensor's
+   largest entry: amendment 4 conceded that it checks small entries beside
+   large ones only absolutely, and in float32 that would hide exactly the kernel
+   errors this milestone exists to find. The composed bound is what the M2 table
+   above already specified for whole programs ("each node's budget composed
+   along the graph"). The M1.5 CPU-vs-PyTorch metric is unchanged.
+
+   An element is **skipped**, and counted, when its bound is unbounded (a
+   division or log whose operand's error reaches zero) or its reference value
+   lies outside the float32 range. A program with any skipped element is
+   counted as skipped as a whole.
+
+   If a later result forces a change to any of this, it is logged as a further
+   revision with before and after, and nothing above is overwritten.
+
+9. **Inputs are rounded to float32 first.** Every input, and every constant in
+   the graph, is rounded with `Math.fround` before the float64 interpreter runs.
+   Both sides start from identical values, and the comparison measures kernel
+   error only.
+
+10. **The exact-zero case under float32.** `random-9` computes `x0 / x0`,
+    whose gradient is exactly zero; in float32 both contributions round at
+    around 1e-7 of their size, not 1e-16. It is judged like everything else,
+    by the propagated bound. That bound is built from the magnitudes of the two
+    gradient contributions (`g/x0` and `-g·x0/(x0·x0)`) that cancel, not from the
+    zero they cancel to: about `(2.5 + 1 + 2.5)·ε·|g/x0| ≈ 7e-7·|g/x0|` (each
+    contribution's division, the products and the final add), against residue
+    of order `u·|g/x0|`. No special case. Under the M1.5 form the same residue would have been
+    judged against a fixed floor instead.
+
+11. **Targets, stated before anything runs.**
+    - Direct per-op tests: every injected kernel bug is caught by them. 100%.
+    - Differential fuzzer: zero unexplained failures under the float32 budget.
+      Every failure is investigated and recorded, whatever it turns out to be.
+    - Fuzzer detection rate per injected bug: reported separately for targeted
+      and general programs. No target. The general-program rate is the
+      unbiased number, and the generator mix is not tuned to change it.
+    - The correctness claim for each kernel rests on the direct tests. The
+      fuzzer is supporting evidence, and the report says so.
+
+12. **Generator float32 mode.** GPU fuzzing uses generator v2 (every
+    unconsumed value an output, valid by construction), never the frozen M1
+    generator. A `f32` option tightens its interval guards so float32 cannot
+    overflow or flush where float64 would not: an `exp` argument must lie in
+    [-40, 4] or is wrapped in tanh first (`e^-40 ≈ 4e-18` is far above the
+    smallest normal float32; without this, `log(exp(x))` with `x` near -1000
+    is fine in float64 and `log(0)` in float32). Denominators and log arguments
+    keep v2's guard of at least 0.1 away from zero, and every value v2's bound
+    of 1e3 in magnitude. With `f32` off the generator is unchanged, so the M1
+    and M1.5 records and golden cases stay byte-identical, which a test checks.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of
