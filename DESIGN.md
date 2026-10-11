@@ -402,6 +402,15 @@ read 2026-10-11), before any kernel ran on a GPU.
     keep v2's guard of at least 0.1 away from zero, and every value v2's bound
     of 1e3 in magnitude. With `f32` off the generator is unchanged, so the M1
     and M1.5 records and golden cases stay byte-identical, which a test checks.
+    (Clarified 2026-10-11, before any GPU run: the guard is for the exps the
+    generator emits. The exps inside softmax and log-softmax are built by the
+    composite and are exempt: their argument is `x - stopGradient(max(x))`,
+    at most 0 by construction, so the largest term is exactly 1 and the sum
+    at least 1; anything that underflows below the smallest normal float32 is
+    covered by the flush allowance. Interval analysis cannot see the
+    correlation, so their intervals can look as wide as [-20, 20]. Measured on
+    the corpus: the guard changed 0 of the first 2,000 corpus programs, and
+    first fires at general seed 9604.)
 
 ## Fusion (milestone 4, criteria fixed in advance)
 
