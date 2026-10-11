@@ -1,9 +1,13 @@
-// A static file server for the report and, from milestone 2, the browser
-// harness pages. Copied from llm-inference-webgpu, range support included.
+// A static file server for the report and the browser harness pages, copied
+// from llm-inference-webgpu, range support included. It also accepts one kind
+// of write: a harness POSTs its results to /record/<name>.json and they are
+// saved to golden/<name>.json, stamped with the machine's power mode. It
+// listens on 127.0.0.1 only.
 //
 //   node tools/serve.js [port]
 
-import { createReadStream, statSync, existsSync } from 'node:fs';
+import { createReadStream, statSync, existsSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,8 +26,58 @@ const TYPES = {
   '.bin': 'application/octet-stream',
 };
 
+// Windows power-mode overlays (memory of this machine: they move CPU timings
+// several-fold). Recorded with every result even when nothing is timed.
+const OVERLAYS = {
+  '961cc777-2547-4f9d-8174-7d86181b8a7a': 'Best power efficiency',
+  '00000000-0000-0000-0000-000000000000': 'Balanced',
+  'ded574b5-45a0-4f42-8737-46345c09c238': 'Best performance',
+};
+
+function powerMode() {
+  const out = { platform: process.platform };
+  if (process.platform !== 'win32') return out;
+  try {
+    const reg = execFileSync('reg', ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes'], { encoding: 'utf8' });
+    for (const key of ['ActiveOverlayAcPowerScheme', 'ActiveOverlayDcPowerScheme']) {
+      const m = new RegExp(`${key}\\s+REG_SZ\\s+(\\S+)`).exec(reg);
+      if (m) out[key] = { guid: m[1], name: OVERLAYS[m[1]] ?? 'unknown' };
+    }
+    const battery = execFileSync('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_Battery).BatteryStatus'], { encoding: 'utf8' }).trim();
+    out.batteryStatus = battery;
+    out.onAC = battery === '2';
+    out.activeMode = (out.onAC ? out.ActiveOverlayAcPowerScheme : out.ActiveOverlayDcPowerScheme)?.name ?? 'unknown';
+  } catch (error) {
+    out.error = String(error.message ?? error);
+  }
+  return out;
+}
+
+function record(req, res, name) {
+  const chunks = [];
+  let total = 0;
+  req.on('data', (c) => {
+    total += c.length;
+    if (total > 200e6) { res.writeHead(413).end('too large'); req.destroy(); return; }
+    chunks.push(c);
+  });
+  req.on('end', () => {
+    let body;
+    try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { res.writeHead(400).end('not JSON'); return; }
+    body.recorded = { at: new Date().toISOString(), power: powerMode() };
+    writeFileSync(join(ROOT, 'golden', `${name}.json`), JSON.stringify(body) + '\n');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ saved: `golden/${name}.json`, power: body.recorded.power }));
+  });
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  if (req.method === 'POST') {
+    const m = /^\/record\/([a-z0-9-]+)\.json$/.exec(url.pathname);
+    if (!m) { res.writeHead(404).end('POST only to /record/<name>.json'); return; }
+    record(req, res, m[1]);
+    return;
+  }
   const requested = decodeURIComponent(url.pathname);
   const relative = normalize(requested).replace(/^([/\\])+/, '');
   let path = join(ROOT, relative);
@@ -100,7 +154,5 @@ const server = createServer((req, res) => {
 server.listen(port, '127.0.0.1', () => {
   console.log(`serving ${ROOT} at http://127.0.0.1:${port}/`);
   console.log(`  report:  http://127.0.0.1:${port}/`);
-  console.log(`  demo:    http://127.0.0.1:${port}/web/demo.html`);
-  console.log(`  probe:   http://127.0.0.1:${port}/web/probe.html`);
-  console.log(`  harness: http://127.0.0.1:${port}/web/{kernels,model,scaling,bench,perplexity,precision}.html`);
+  console.log(`  harness: http://127.0.0.1:${port}/web/gpu.html`);
 });

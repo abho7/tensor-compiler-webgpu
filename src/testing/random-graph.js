@@ -114,6 +114,10 @@ class Builder {
     // right operand always an input, and the shapes and permutations that hide
     // bugs avoided. The general generator keeps all of those on purpose.
     this.strict = false;
+    // Float32 mode (DESIGN.md amendment 12): tighter guards so float32 cannot
+    // overflow or flush where float64 would not. Off by default, which leaves
+    // every v2 program exactly as milestone 1.5 recorded it.
+    this.f32 = false;
   }
 
   /** Record a node's interval; returns the id, or undefined if it is too large. */
@@ -176,9 +180,13 @@ class Builder {
     return this.track(this.g.exp(this.boundedForExp(x)));
   }
 
-  /** x, or tanh(x) when exp(x) could exceed the bound. */
+  /**
+   * x, or tanh(x) when exp(x) could exceed the bound or, in float32 mode,
+   * underflow (an argument below -40).
+   */
   boundedForExp(x) {
-    return this.iv.get(x)[1] <= 4 ? x : this.track(this.g.tanh(x));
+    const [lo, hi] = this.iv.get(x);
+    return hi <= 4 && (!this.f32 || lo >= -40) ? x : this.track(this.g.tanh(x));
   }
 
   /** A value with x's shape whose interval is strictly positive. */
@@ -365,11 +373,13 @@ const TARGETED = {
 
 /**
  * A random program. `focus` (one of TARGETS) builds it around that op;
- * otherwise it is a general program over every op.
+ * otherwise it is a general program over every op. `f32` turns on the
+ * float32 guards.
  */
-export function randomProgram(seed, { focus } = {}) {
+export function randomProgram(seed, { focus, f32 = false } = {}) {
   const rng = new Rng(focus ? (seed * 31 + TARGETS.indexOf(focus) + 1) >>> 0 : seed);
   const b = new Builder(rng);
+  b.f32 = f32;
   let last;
 
   if (focus) {
@@ -424,7 +434,7 @@ function tryOp(b, op, operand) {
  * The fuzzing corpus for program index i: alternately a general program and a
  * targeted one, cycling through TARGETS.
  */
-export function corpusProgram(i) {
-  if (i % 2 === 1) return randomProgram(i);
-  return randomProgram(i, { focus: TARGETS[(i / 2) % TARGETS.length] });
+export function corpusProgram(i, { f32 = false } = {}) {
+  if (i % 2 === 1) return randomProgram(i, { f32 });
+  return randomProgram(i, { focus: TARGETS[(i / 2) % TARGETS.length], f32 });
 }

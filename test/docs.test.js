@@ -60,6 +60,24 @@ test("the README's milestone 1.5 figures match golden/measurements.json", () => 
   assert.deepEqual(met, ['transpose'], 'the README says the target is met for transpose only');
 });
 
+test("the README's milestone 2 figures match golden/measurements.json", () => {
+  const g = JSON.parse(text('../golden/measurements.json')).m2;
+  const bugs = g.sabotage.filter((s) => s.bug);
+  const ew = g.sabotage.find((s) => s.name === 'elementwise-no-bounds-check');
+  assert.match(readme, new RegExp(`${g.direct.pass} of ${g.direct.cases} pass`));
+  assert.match(readme, new RegExp(`${g.fuzz.passed.toLocaleString('en-US')} of ${g.fuzz.runs.toLocaleString('en-US')} runs pass`));
+  assert.match(readme, new RegExp(`${g.fuzz.programs.toLocaleString('en-US')} generator-v2 programs`));
+  assert.equal(g.fuzz.skipped, 0, 'the README says none skipped');
+  assert.match(readme, new RegExp(`the direct tests catch all ${bugs.length}`));
+  assert.ok(g.targets.directCatchesEveryBug && bugs.every((s) => s.caughtFirstBy.startsWith('direct')));
+  assert.equal(g.targets.reorderFlagged, false);
+  assert.deepEqual(g.targets.bugsMissedByFuzzer, ['elementwise-no-bounds-check']);
+  const affected = ew.fuzz.general.containing + ew.fuzz.targeted.containing;
+  assert.match(readme, new RegExp(`0 of the\\s+${affected.toLocaleString('en-US')} programs`));
+  assert.equal(g.firstRun.pass, g.firstRun.cases - 1);
+  assert.equal(g.tile, 16);
+});
+
 test('the report page types in no measured number', () => {
   // Every figure comes from measurements.json. The page's own numerals are
   // limited to fixed context: milestone numbers, 10⁴, 20 draws, logits near 800.

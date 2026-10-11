@@ -412,6 +412,22 @@ read 2026-10-11), before any kernel ran on a GPU.
     the corpus: the guard changed 0 of the first 2,000 corpus programs, and
     first fires at general seed 9604.)
 
+### Milestone 2 revisions, forced by results
+
+R2. **tanh overflows on this adapter, and my derivation missed that the
+    specification allows it** (2026-10-11, first GPU run). The direct test
+    `tanh large [1000]` returned NaN where the answer is -1: on this adapter
+    (Intel gen-12lp) tanh is accurate up to |x| = 88.5 and NaN from |x| >= 89,
+    exactly where exp overflows float32 (88.72). The specification's tanh is
+    "the worse of" 1e-5 and the bound inherited from sinh/cosh, and that
+    expression overflows there too, so NaN is a permitted result. Amendment 8's
+    first-order derivation assumed exp stays finite and does not say so.
+    Before: the kernel computed `tanh(x)`. After: `tanh(clamp(x, -20, 20))`;
+    `tanh(20) = 1 - 8.5e-18` is exactly 1 in float32, so nothing is lost and
+    the kernel never enters the region where the builtin may return anything.
+    The budget is unchanged. The failing run is kept as
+    `golden/gpu-m2-run1-direct.json` (251 of 252 direct cases passed).
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of

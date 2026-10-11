@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU checks</title>
+<style>
+  :root { --ink: #16171b; --dim: #5c6068; --bg: #fbfbfc; --good: #15803d; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e7e9ee; --dim: #9aa1ab; --bg: #131418; --good: #4ade80; --bad: #f87171; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 ui-monospace, Consolas, monospace; }
+  main { max-width: 56rem; margin: 0 auto; padding: 2rem 1rem; }
+  .dim { color: var(--dim); } .good { color: var(--good); } .bad { color: var(--bad); }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <h1>Milestone 2 GPU checks</h1>
+  <p class="dim">Direct per-op tests, then differential fuzzing of forward and gradient graphs, then
+  each injected kernel bug against both, under the float32 budget in DESIGN.md. Nothing is timed.
+  Query: <code>?programs=N</code> (default 2000), <code>&amp;record=0</code> to skip saving,
+  <code>&amp;phase=direct</code> for the direct tests alone.</p>
+  <p id="status">starting&hellip;</p>
+  <pre id="out"></pre>
+</main>
+<script type="module">
+import { GpuRunner } from '../src/gpu/runtime.js';
+import { runDirect, runFuzz, runSabotage, FUZZ_PROGRAMS } from '../src/gpu/harness.js';
+import { SOURCE_FILES, hashSources } from '../src/gpu/sources.js';
+
+const q = new URLSearchParams(location.search);
+const programs = Number(q.get('programs') ?? FUZZ_PROGRAMS);
+const phase = q.get('phase') ?? 'all';
+const status = document.getElementById('status');
+const out = document.getElementById('out');
+const progress = (s) => { status.textContent = s; window.__progress = s; };
+const log = (s) => { out.textContent += s + '\n'; };
+
+try {
+  const texts = await Promise.all(SOURCE_FILES.map((f) => fetch(`../${f}`, { cache: 'no-store' }).then((r) => {
+    if (!r.ok) throw new Error(`cannot read ${f}`);
+    return r.text();
+  })));
+  const sourceHash = hashSources(texts);
+  const runner = await GpuRunner.create();
+  const adapter = runner.info();
+  log(`adapter: ${adapter.vendor} ${adapter.architecture} ${adapter.description}`);
+  log(`sources: ${sourceHash}`);
+
+  const direct = await runDirect(runner, { progress });
+  const directFails = direct.filter((d) => d.status !== 'pass');
+  log(`direct: ${direct.length - directFails.length}/${direct.length} pass`);
+  for (const d of directFails) log(`  FAIL ${d.name}: ${d.status} ${d.error ?? ''} ${JSON.stringify(d.first)} canary=${d.canaryOk}`);
+
+  let fuzz = null, sabotage = null;
+  if (phase !== 'direct') {
+    fuzz = await runFuzz(runner, { programs, progress });
+    log(`fuzz: ${fuzz.programs} programs, ${fuzz.skipped} skipped, ${fuzz.runs} runs, ${fuzz.passed} pass, ${fuzz.failed} fail, ${fuzz.errors} errors, worst ratio ${fuzz.worst}`);
+    for (const f of fuzz.failures.slice(0, 20)) log(`  FAIL program ${f.index} ${f.run} ${f.matmul}: ${JSON.stringify(f.first ?? f.error)}`);
+  }
+  if (phase === 'all') {
+    sabotage = await runSabotage(runner, direct, { programs, progress });
+    for (const s of sabotage) {
+      const rate = (x) => `${x.caught}/${x.containing}`;
+      log(`sabotage ${s.name}: direct ${s.direct.caught}/${s.direct.cases} (first: ${s.direct.first}), fuzz general ${rate(s.fuzz.general)}, targeted ${rate(s.fuzz.targeted)}, first catch ${s.fuzz.firstCatch}`);
+    }
+  }
+  if (runner.lost) throw new Error(`device lost during the run: ${runner.lost.message}`);
+
+  const result = { milestone: 2, sourceHash, adapter, options: { programs, phase }, direct, fuzz, sabotage };
+  window.__result = result;
+  if (q.get('record') !== '0' && phase === 'all') {
+    const r = await fetch('/record/gpu-m2.json', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) });
+    const saved = await r.json();
+    log(`recorded: ${saved.saved}, power mode: ${saved.power?.activeMode} (on AC: ${saved.power?.onAC})`);
+  }
+  progress('done');
+  status.className = 'good';
+} catch (error) {
+  window.__error = String(error.stack ?? error);
+  status.textContent = `error: ${error.message ?? error}`;
+  status.className = 'bad';
+}
+window.__done = true;
+</script>

@@ -23,7 +23,7 @@ So the first milestone is the reference that everything after it is checked agai
 |---|---|---|
 | 1 | tensor IR, autodiff, float64 reference; fuzzed, and checked against PyTorch | **done** |
 | 1.5 | hardening: comparison metric v2, generator v2, per-bug detection rates | **done** |
-| 2 | lowering to WGSL, fuzzed against the interpreter under the float32 budget | not started |
+| 2 | every op lowered to WGSL and checked on a real GPU under a float32 budget; correctness only | **done** |
 | 3 | train an MLP, then a small transformer, in the browser; loss curves against PyTorch | not started |
 | 4 | fusion and autotuning, timed against llm-inference-webgpu's hand-written kernels | not started |
 
@@ -135,12 +135,45 @@ test/docs.test.js checks the ones quoted below.
   seeing that, so their rate measures reach for these known bugs; the general rate is the less
   biased one.
 
+## Milestone 2: WGSL kernels, correctness only
+
+Every IR op lowers to one WGSL kernel (no fusion), generated as text in plain JavaScript
+([`src/gpu/codegen.js`](src/gpu/codegen.js)): elementwise ops, a strided gather that serves
+broadcast, transpose and reshape, `sum` and `max` along an axis, and matmul twice, naive and
+tiled (16 x 16 in workgroup memory). Softmax and log-softmax run as their decomposition. Forward
+graphs and the gradient graphs autodiff produces both run on the GPU. Nothing is timed.
+
+**The budget**, fixed in DESIGN.md before any kernel ran: per element,
+`abs(gpu - ref) <= 2 · E`, `E` a first-order float32 error bound propagated node by node from the
+WGSL specification's stated accuracy per op, with inputs rounded to float32 before the float64
+reference runs. The exact-zero case (`x0 / x0`) needs no special rule, because its bound comes from
+the terms that cancel.
+
+**Results** (Intel gen-12lp, Chrome, power mode recorded with the results):
+
+- **Direct per-op adversarial tests: 252 of 252 pass.** They carry the correctness claim: sizes
+  that are not multiples of the workgroup or tile, size-1 dims, rank 3 and 4, huge and tiny
+  magnitudes, subnormals, exact zeros and long reductions, with a canary past every buffer's end.
+- **Differential fuzzing: 5,318 of 5,318 runs pass** (2,000 generator-v2 programs, forward and
+  gradient, both matmul variants, every node compared, none skipped). Supporting evidence.
+- **Injected kernel bugs: the direct tests catch all 7**, and catch each one first. A correct
+  change of matmul summation order is flagged by nothing, so the budget is not too tight.
+- **The fuzzer misses one bug entirely:** a missing bounds check in the last workgroup, 0 of the
+  1,954 programs it could affect. With buffers sized exactly to their tensors, the stray writes
+  change nothing a comparison can see; only the direct tests' canaries show them.
+- **The first GPU run failed one case:** this adapter's `tanh` returns NaN once `exp` overflows
+  float32, which the specification permits and my derivation had not accounted for. The kernel now
+  clamps its argument; the budget did not change; the failing run is kept in `golden/`.
+
+`web/gpu.html` runs all of it and saves the results through `tools/serve.js`; CI checks the
+recording came from the sources checked in.
+
 ## Running it
 
 ```
 node --test                # everything, including recomputing measurements.json (minutes)
 node tools/measure.js      # rewrite golden/measurements.json
-node tools/serve.js        # the report at http://localhost:8099/
+node tools/serve.js        # the report at http://localhost:8099/; GPU checks at /web/gpu.html
 ```
 
 Regenerating the PyTorch goldens (only needed if the cases change):
@@ -158,10 +191,12 @@ node tools/export-cases.js
 src/ir/         graph, shape rules, builder (broadcasting, softmax, log-softmax)
 src/autodiff.js the transform and its rule table
 src/interp.js   the float64 reference interpreter
+src/gpu/        float32 bounds, WGSL codegen, lowering, emulator, runtime, direct cases, harness
 src/testing/    RNG, random programs (v1 frozen, v2), gradient checker, sabotage, golden comparison, measurement
 oracle/         torch_golden.py (offline only)
 golden/         cases.json, torch.json, measurements.json
-tools/          export-cases.js, measure.js, serve.js
+tools/          export-cases.js, measure.js, snapshot-wgsl.js, serve.js
+web/gpu.html    the GPU harness
 test/           node --test
 ```
 
