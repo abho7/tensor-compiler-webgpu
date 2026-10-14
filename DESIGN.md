@@ -428,6 +428,161 @@ R2. **tanh overflows on this adapter, and my derivation missed that the
     The budget is unchanged. The failing run is kept as
     `golden/gpu-m2-run1-direct.json` (251 of 252 direct cases passed).
 
+### Milestone 3a preconditions (2026-10-14), committed before any training run
+
+Milestone 3a trains an MLP classifier in the browser on the GPU. The
+transformer is 3b. Nothing is timed. Everything below was written before any
+training code existed or ran; it is amended only by dated revisions with
+before and after.
+
+13. **The new op: `sqrt`, and only `sqrt`.** Adam's update divides by
+    `sqrt(v̂) + eps`. Nothing else in the MLP, softmax cross-entropy, SGD with
+    momentum or Adam needs an op the IR lacks: products, quotients, sums,
+    broadcasts and `log`/`exp` already exist, and the step-dependent bias
+    corrections are carried as state (below), so no `pow` is needed. `sqrt` gets
+    the full pipeline of every other op:
+    - IR: a unary op, result shape of its input, domain x >= 0.
+    - Interpreter: `Math.sqrt`.
+    - Autodiff: `d sqrt(x) = g / (2·sqrt(x))`, written with the result `y`
+      as `g / (2·y)`.
+    - Checks of the rule: finite differences on random programs containing it
+      (the M1 checker and budget, 1e-6), and PyTorch float64 golden cases (the
+      metric v2 budget, 1e-12), in new files so the M1 goldens stay byte-identical.
+    - Bound (amendment 8 extended): the WGSL specification gives sqrt as
+      "inherited from 1.0 / inverseSqrt(x)", with inverseSqrt to 2 ULP and the
+      division to 2.5 ULP, so its own error is `4.5·ε·|r|` to first order. It
+      inherits `min(sqrt(e_x), e_x / sqrt(x))` from its operand (sqrt is
+      1/2-Hölder, so this holds even when `e_x` reaches `x`), plus the flush
+      allowance. A negative operand is unbounded and skipped. At exactly 0 the
+      specification leaves `inverseSqrt(0)` undefined, so `sqrt(0)` may come
+      back as 0 or as a flushed tiny value; the flush allowance covers both,
+      and the direct tests check 0 explicitly because Adam meets it whenever a
+      gradient element is exactly zero (a dead ReLU unit).
+    - WGSL: one elementwise kernel, with direct adversarial tests under the
+      float32 budget (sizes off the workgroup grid, size-1 dims, rank 3, huge,
+      tiny, subnormal and exactly zero inputs) and sabotage.
+
+14. **Optimizers are IR.** A training step is one graph: the model's forward
+    pass, its loss, autodiff's backward pass, and the optimizer's update, all
+    built from IR ops and compiled through the same interpreter, lowering and
+    kernels as everything else. Its inputs are the parameters, the optimizer
+    state and the batch; its outputs are the loss and the new parameters and
+    state. Nothing about an optimizer is special-cased in a runtime.
+    - SGD with momentum, as PyTorch defines it (dampening 0, not Nesterov):
+      `g' = g + wd·p`, `buf = μ·buf + g'`, `p = p - lr·buf`, with `buf` starting
+      at 0 (which equals PyTorch's first step, `buf = g'`).
+    - Adam, as PyTorch defines it (L2 weight decay, not AdamW):
+      `g' = g + wd·p`, `m = β1·m + (1-β1)·g'`, `v = β2·v + (1-β2)·g'²`,
+      `p = p - lr·(m / (1-β1^t)) / (sqrt(v / (1-β2^t)) + eps)`. The powers
+      `β1^t` and `β2^t` are state scalars, multiplied by β each step, so the
+      graph never needs the step number.
+    - Hyperparameters are constants in the graph: SGD lr 0.1, momentum 0.9,
+      weight decay 5e-4; Adam lr 0.01, betas (0.9, 0.999), eps 1e-8, weight
+      decay 1e-4 (for the synthetic set; the demo's are below).
+
+15. **The model and the data.**
+    - MLP: `x → relu(x·W1 + b1) → ·W2 + b2 → log-softmax`, loss the mean
+      negative log-likelihood of the true class (softmax cross-entropy), all
+      from existing ops. Initialisation as PyTorch's `nn.Linear` default,
+      uniform in ±1/sqrt(fan_in) for weights and biases, drawn from this
+      project's seeded RNG and handed to PyTorch explicitly, so both sides
+      start from identical numbers.
+    - **Synthetic set (golden comparisons):** generated in JS from a fixed
+      seed and committed: four interleaved spiral arms in two dimensions,
+      lifted to 8 features by a fixed seeded linear map plus noise; 256 training
+      and 256 test points, balanced across 4 classes. The MLP is 8 → 16 → 4.
+      Batches of 32 from a seeded permutation each epoch, so the batch order is
+      a function of the seed alone and both sides see the same batches.
+      CI regenerates the set from its seed and fails if it differs.
+    - **Real set (the demo): UCI Optical Recognition of Handwritten Digits**
+      (Alpaydin & Kaynak, 1998; doi:10.24432/C50P49), licensed CC BY 4.0,
+      downloaded 2026-10-14 from
+      `https://archive.ics.uci.edu/ml/machine-learning-databases/optdigits/`
+      and committed byte for byte in `data/optdigits/`: `optdigits.tra`, 3,823
+      rows, SHA-256 `e1b683cc211604fe8fd8c4417e6a69f31380e0c61d4af22e93cc21e9257ffedd`;
+      `optdigits.tes`, 1,797 rows, SHA-256
+      `6ebb3d2fee246a4e99363262ddf8a00a3c41bee6014c373ed9d9216ba7f651b8`.
+      64 features (8x8 counts, 0 to 16, divided by 16) and a digit label. The
+      demo trains 64 → 64 → 10 with Adam (lr 1e-3, other settings as above,
+      no weight decay), batch 64, 10 epochs, and is overlaid on a PyTorch
+      float64 run from the same initialisation and batch order. CI checks the
+      checksums.
+
+16. **What "matches PyTorch" means for training: the float64 interpreter
+    against PyTorch float64.** Same data, initialisation and batch order. Four
+    seeds, each trained 50 steps with SGD and with Adam: eight golden runs,
+    produced offline by `oracle/torch_train.py` and committed. Every step, the
+    loss and every parameter tensor are compared in the metric v2 form,
+    `abs(ours - torch) <= atol + rtol·abs(torch)`, `atol = 1e-8·max(1, max abs(torch))`,
+    `rtol = 1e-8`.
+    Why 1e-8: per op, this interpreter and PyTorch differ by summation order and
+    libm rounding, which M1 measured at under 1e-15 relative per tensor. A step
+    composes a few dozen ops, so one step's disagreement is of order 1e-15 to
+    1e-14 of the parameters' scale. Training then carries it forward, amplified
+    each step by at most the step map's Lipschitz constant; for these small
+    learning rates and small initial weights, that is taken to be at most 1.3,
+    so 50 steps amplify by at most 1.3^50 ≈ 5e5. That gives up to about 5e-9,
+    inside 1e-8. The budget is not loosened if this assumption fails; a failure
+    is logged. A ReLU input within rounding of zero can send the two sides down
+    different branches, which this tolerance does not cover; that would also be
+    recorded as a failure, not explained away.
+
+17. **What "agrees" means for the GPU: float32 against the float64
+    interpreter**, on identical float32-rounded inputs (amendment 9).
+    - **Per step, teacher-forced, every step of the eight golden runs:** at each
+      step both sides are given the same float32-rounded state and batch and run
+      one step, judged on every node by the float32 budget (amendment 8, S = 2).
+      This is a single-step check, so the budget is exactly milestone 2's.
+    - **Free-running, the first K = 5 steps:** each side trains on its own
+      outputs, and the bound is carried across steps: the next step's inputs
+      enter with the previous step's output bounds instead of zero. K = 5 because
+      worst-case bounds compound multiplicatively from step to step (and a ReLU
+      within its bound of zero contributes a whole unit), so they lose meaning
+      after a handful of steps; five steps are enough to feed every state tensor
+      back four times, including Adam's bias-correction powers and both moment
+      buffers. The ratio of each bound to the value it bounds is reported, so a
+      bound that has become vacuous is visible rather than counted as a pass.
+    - **Statistically, after the trajectories have diverged:** 24 seeds, each
+      trained 200 steps (25 epochs) on the synthetic set with SGD and with Adam,
+      once on the GPU in float32 and once by the interpreter in float64, from the
+      same initialisation and batch order. For each run, the final full-training
+      loss and the test accuracy are computed by the float64 interpreter from
+      that run's final parameters, so only the training trajectory differs. For
+      each optimizer and each metric, the paired difference (GPU minus CPU) must
+      pass a two one-sided t-test of equivalence at α = 0.05 (equivalently, its
+      90% confidence interval, 23 degrees of freedom, must lie within the
+      margin). Margins: 0.02 nats of loss, and 2 percentage points of accuracy
+      (about 5 of the 256 test points). Differences below these are taken to be
+      of no practical consequence for a classifier of this size; that is a
+      judgement, stated here so it cannot be adjusted afterwards.
+
+18. **Sabotage, and how detection is counted.** Each bug is injected alone:
+    - Adam's second-moment bias correction computed with β1 instead of β2;
+    - SGD momentum off by one: the parameter updated with the previous step's
+      buffer;
+    - the weight-decay term's sign flipped (`g - wd·p`), in both optimizers;
+    - `sqrt`'s gradient missing its factor of one half (`g / y`);
+    - a bounds bug in the `sqrt` kernel: its guard lets index `n` through.
+    The checks are the PyTorch training goldens, finite differences, the PyTorch
+    op goldens, the direct `sqrt` kernel tests, and the per-step GPU check. A
+    detection rate is the fraction of a check's independent trials that catch
+    the bug: golden runs to which the bug applies, programs containing `sqrt`,
+    golden cases containing `sqrt`, direct cases, and teacher-forced runs. Which
+    check catches a bug first is recorded in the order the checks run. The only
+    expectation set in advance is that every bug is caught by at least one
+    check. One prediction, so it can be held to: a bug in an optimizer's graph
+    is invisible to the GPU-against-CPU checks by construction, since both run
+    the same graph; only the PyTorch goldens can see it.
+
+19. **Milestone 2's record under the new op.** Adding `sqrt` edits files inside
+    milestone 2's source hash, so the check that the M2 recording came from the
+    checked-in sources is pinned to commit `8f45285`, where it was recorded: CI
+    reads those files from git history and hashes them. M2's kernel snapshot
+    and kernel list are frozen as they were; new kernels get their own
+    snapshot. The M2 harness is then run again on the extended compiler, into
+    a new file, and must reproduce M2's results exactly; that is what shows the
+    extension changed nothing M2 measured.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of
