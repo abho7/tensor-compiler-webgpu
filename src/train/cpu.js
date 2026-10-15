@@ -6,17 +6,18 @@ import { buildStep, buildEval, initialState, PARAMS } from './step.js';
 import { batchSchedule, gather, initMlp } from './data.js';
 
 /**
- * Train for `steps` steps. Returns { losses, params } where losses[t] is the
- * loss computed at step t (from the parameters before that step's update) and
- * params[t] the parameters after it (only when `keepParams`). `init` and
+ * Train for `steps` steps. Returns { losses, params, states, final, order }
+ * where losses[t] is the loss computed at step t (from the parameters before
+ * that step's update), params[t] and states[t] the parameters and optimizer
+ * state after it (with `keepParams` / `keepState`), and order the batches. `init` and
  * `schedule` default to the seeded ones, so the same seed gives the same run.
  */
-export function trainCpu({ dims, data, opt, seed, steps, batch, sabotage, keepParams = false, init, schedule }) {
-  const step = buildStep(dims, batch, opt, { sabotage });
+export function trainCpu({ dims, data, opt, seed, steps, batch, sabotage, rules, keepParams = false, keepState = false, init, schedule }) {
+  const step = buildStep(dims, batch, opt, { sabotage, rules });
   let params = Object.fromEntries(Object.entries(init ?? initMlp(dims, seed)).map(([k, v]) => [k, Float64Array.from(v)]));
   let state = initialState(opt, dims);
   const order = schedule ?? batchSchedule(data.y.length, batch, steps, seed);
-  const losses = [], kept = [];
+  const losses = [], kept = [], keptState = [];
   for (let t = 0; t < steps; t++) {
     const { x, y } = gather(data, order[t], dims.inputs, dims.classes);
     const values = evaluate(step.graph, { ...params, ...state, x, y, [step.cotangent]: [1] });
@@ -24,8 +25,9 @@ export function trainCpu({ dims, data, opt, seed, steps, batch, sabotage, keepPa
     params = Object.fromEntries(PARAMS.map((p) => [p, values[step.outputs[p]]]));
     state = Object.fromEntries(Object.keys(state).map((k) => [k, values[step.outputs[k]]]));
     if (keepParams) kept.push(params);
+    if (keepState) keptState.push(state);
   }
-  return { losses, params: keepParams ? kept : undefined, final: params };
+  return { losses, params: keepParams ? kept : undefined, states: keepState ? keptState : undefined, final: params, order };
 }
 
 /** Mean cross-entropy and accuracy of `params` on `data`, in float64. */

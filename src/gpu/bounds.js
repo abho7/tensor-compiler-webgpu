@@ -82,14 +82,25 @@ const STRUCTURED = {
  * Evaluate `graph` in float64 from float32-rounded inputs and constants, with
  * a bound per element. Returns { values, bounds, inputs }: arrays per node,
  * and the rounded inputs actually used (what the GPU must be given).
+ *
+ * `carried` (milestone 3a, amendment 17) maps input names to { value, bound }:
+ * an input that is a previous step's output, taken at its exact float64 value
+ * with that step's bound, rather than rounded to float32 with bound zero. Its
+ * entry in `inputs` is then the float64 value; the GPU is given its own.
  */
-export function referenceWithBounds(graph, rawInputs) {
+export function referenceWithBounds(graph, rawInputs, { carried = {} } = {}) {
   const values = new Array(graph.nodes.length);
   const bounds = new Array(graph.nodes.length);
   const inputs = {};
   for (const node of graph.nodes) {
     let value, bound;
-    if (node.op === 'input') {
+    if (node.op === 'input' && carried[node.attrs.name]) {
+      const c = carried[node.attrs.name];
+      if (c.value.length !== size(node.shape)) throw new Error(`carried input '${node.attrs.name}' has ${c.value.length} values, needs ${size(node.shape)}`);
+      value = Float64Array.from(c.value);
+      inputs[node.attrs.name] = value;
+      bound = Float64Array.from(c.bound);
+    } else if (node.op === 'input') {
       const raw = rawInputs[node.attrs.name];
       if (raw === undefined) throw new Error(`no value for input '${node.attrs.name}'`);
       if (raw.length !== size(node.shape)) throw new Error(`input '${node.attrs.name}' has ${raw.length} values, needs ${size(node.shape)}`);

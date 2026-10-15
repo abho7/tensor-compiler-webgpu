@@ -14,6 +14,7 @@ const result = measureAll({ cases: read('../golden/cases.json').cases, golden: r
   m3: {
     sqrtCases: read('../golden/cases-m3.json').cases, sqrtGolden: read('../golden/torch-m3.json'),
     trainSpec: read('../golden/train-spec-m3.json'), torchTrain: read('../golden/torch-train-m3.json'),
+    gpuRecord: read('../golden/gpu-m3.json'), gpuDemo: read('../golden/gpu-m3-demo.json'),
     optdigits: {
       optdigitsTrain: readFileSync(new URL('../data/optdigits/optdigits.tra', import.meta.url), 'utf8'),
       optdigitsTest: readFileSync(new URL('../data/optdigits/optdigits.tes', import.meta.url), 'utf8'),

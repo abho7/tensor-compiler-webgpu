@@ -67,7 +67,11 @@ try {
   const result = { milestone: 2, sourceHash, adapter, options: { programs, phase }, direct, fuzz, sabotage };
   window.__result = result;
   if (q.get('record') !== '0' && phase === 'all') {
-    const r = await fetch('/record/gpu-m2.json', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) });
+    // Never gpu-m2.json: that is milestone 2's record. Re-runs go elsewhere
+    // (?out=<name>, default gpu-m2-rerun).
+    const name = (q.get('out') ?? 'gpu-m2-rerun').replace(/[^a-z0-9-]/g, '');
+    if (name === 'gpu-m2') throw new Error("refusing to overwrite golden/gpu-m2.json, milestone 2's record");
+    const r = await fetch(`/record/${name}.json`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) });
     const saved = await r.json();
     log(`recorded: ${saved.saved}, power mode: ${saved.power?.activeMode} (on AC: ${saved.power?.onAC})`);
   }

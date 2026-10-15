@@ -97,7 +97,9 @@ test('the report page types in no measured number', () => {
   const html = text('../index.html');
   const body = html.slice(html.indexOf('<main>'), html.indexOf('<script'));
   const script = html.slice(html.indexOf('<script'));
-  const prose = (body + script.replace(/\$\{[^}]*\}/g, '')).replace(/<[^>]+>/g, ' ');
+  // Chart geometry is layout, not measurement: fenced by layout-start/layout-end markers and skipped.
+  const unfenced = script.replace(/layout-start[\s\S]*?layout-end/g, '');
+  const prose = (body + unfenced.replace(/\$\{[^}]*\}/g, '')).replace(/<[^>]+>/g, ' ');
   const numerals = prose.match(/\b\d+(\.\d+)?(e-?\d+)?\b/g) ?? [];
   // 1e-3 and 1e4 are sci()'s display thresholds for switching to exponent form.
   // 1.5 is the hardening milestone's name.

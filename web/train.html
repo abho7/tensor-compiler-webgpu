@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Train on your GPU</title>
+<meta name="description" content="A small MLP trained live on handwritten digits by WGSL kernels this project's compiler generated, overlaid on PyTorch's run from the same start.">
+<style>
+  :root { --ink: #16171b; --dim: #5c6068; --faint: #8b9099; --line: #e3e5e9; --bg: #fbfbfc; --card: #ffffff;
+          --accent: #3b5bdb; --ref: #9aa1ab; --good: #15803d; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --ink: #e7e9ee; --dim: #9aa1ab; --faint: #767c86; --line: #2a2d34; --bg: #131418;
+          --card: #191b20; --accent: #91a7ff; --ref: #5c6068; --good: #4ade80; --bad: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  main { max-width: 52rem; margin: 0 auto; padding: 3rem 1rem 5rem; }
+  h1 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 .5rem; }
+  p { max-width: 46rem; } .dim { color: var(--dim); } .note { color: var(--dim); font-size: .86rem; }
+  a { color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; margin: 1rem 0; }
+  button { font: inherit; padding: .55rem 1rem; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: var(--bg); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  svg { width: 100%; height: auto; display: block; }
+  .axis { stroke: var(--line); } .lbl { fill: var(--faint); font-size: 11px; }
+  .ref { fill: none; stroke: var(--ref); stroke-width: 2; } .gpu { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .key span { display: inline-flex; align-items: center; gap: .4rem; margin-right: 1.2rem; font-size: .85rem; color: var(--dim); }
+  .key i { width: 18px; height: 3px; display: inline-block; }
+  table { border-collapse: collapse; font-size: .9rem; } td { padding: .2rem 1.2rem .2rem 0; } td.n { text-align: right; }
+  .good { color: var(--good); } .bad { color: var(--bad); }
+</style>
+<main>
+  <h1>Train a digit classifier on your GPU</h1>
+  <p class="dim">A 64&rarr;64&rarr;10 MLP learning UCI's 8&times;8 handwritten digits with Adam. Every step &mdash;
+  forward pass, loss, backward pass and the optimizer's update &mdash; is one graph in this project's IR, compiled to
+  WGSL kernels by its own compiler and run in your browser. The grey curve is PyTorch's run from the same initial
+  weights on the same batches, in float64; yours is float32 on your GPU. <a href="../">The report</a> says what
+  was checked and how.</p>
+  <div class="card">
+    <button id="go" disabled>Loading&hellip;</button>
+    <span id="status" class="note" style="margin-left:.8rem"></span>
+    <div class="key" style="margin-top:.8rem"><span><i style="background:var(--accent)"></i>your GPU, float32</span><span><i style="background:var(--ref)"></i>PyTorch, float64</span></div>
+    <svg id="chart" viewBox="0 0 640 260" role="img" aria-label="Training loss per step"></svg>
+    <table id="result"></table>
+  </div>
+  <p class="note" id="about"></p>
+  <p class="note">Data: UCI Optical Recognition of Handwritten Digits (Alpaydin &amp; Kaynak, 1998;
+  doi:10.24432/C50P49), CC BY 4.0, served from this repository and checked against its SHA-256 before use.
+  Nothing here is timed. The power mode of the machine is not readable from a browser; it is recorded only when this
+  page runs on the project's own local server.</p>
+</main>
+<script type="module">
+import { GpuRunner } from '../src/gpu/runtime.js';
+import { GpuTrainer } from '../src/gpu/trainer.js';
+import { buildStep, initialState } from '../src/train/step.js';
+import { parseOptdigits, gather } from '../src/train/data.js';
+import { evaluateMlp } from '../src/train/cpu.js';
+import { SOURCE_FILES, hashSources } from '../src/gpu/sources.js';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+async function fetchChecked(entry) {
+  const buf = await (await fetch(`../${entry.path}`)).arrayBuffer();
+  const digest = hex(await crypto.subtle.digest('SHA-256', buf));
+  if (digest !== entry.sha256) throw new Error(`${entry.path}: SHA-256 ${digest} is not the recorded ${entry.sha256}`);
+  return new TextDecoder().decode(buf);
+}
+
+function draw(ref, gpu, steps) {
+  const W = 640, H = 260, L = 44, R = 10, T = 10, B = 28;
+  const ymax = Math.max(...ref, ...(gpu.length ? gpu : [0])) * 1.05;
+  const x = (t) => L + (t / (steps - 1)) * (W - L - R);
+  const y = (v) => T + (1 - v / ymax) * (H - T - B);
+  const line = (vals) => vals.map((v, t) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const ticks = [0, ymax / 2, ymax].map((v) => `<text class="lbl" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(2)}</text>`).join('');
+  $('chart').innerHTML = `<line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/>
+    ${ticks}<text class="lbl" x="${W - R}" y="${H - 8}" text-anchor="end">step ${steps}</text><text class="lbl" x="${L}" y="${H - 8}">loss per step</text>
+    <polyline class="ref" points="${line(ref)}"/>${gpu.length ? `<polyline class="gpu" points="${line(gpu)}"/>` : ''}`;
+}
+
+try {
+  const [spec, torch] = await Promise.all([
+    fetch('../golden/train-spec-m3.json').then((r) => r.json()),
+    fetch('../golden/torch-train-m3.json').then((r) => r.json()),
+  ]);
+  const d = spec.demo;
+  const [trainText, testText] = await Promise.all([fetchChecked(d.files.train), fetchChecked(d.files.test)]);
+  const train = parseOptdigits(trainText), test = parseOptdigits(testText);
+  draw(torch.demo.losses, [], d.steps);
+  if (!navigator.gpu) throw new Error('this browser has no WebGPU');
+  const runner = await GpuRunner.create();
+  const adapter = runner.info();
+  $('about').textContent = `Adapter: ${[adapter.vendor, adapter.architecture, adapter.description].filter(Boolean).join(' ')}. ${adapter.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] ?? ''}`;
+  $('go').disabled = false;
+  $('go').textContent = `Train ${d.steps} steps`;
+
+  $('go').onclick = async () => {
+    $('go').disabled = true;
+    const step = buildStep(d.dims, d.batch, d.optimizer);
+    const trainer = new GpuTrainer(runner, step, d.init, initialState(d.optimizer, d.dims));
+    const losses = [];
+    for (let t = 0; t < d.steps; t++) {
+      const { x, y } = gather(train, d.schedule[t], d.dims.inputs, d.dims.classes);
+      losses.push(await trainer.train(x, y));
+      if (t % 10 === 9 || t === d.steps - 1) { draw(torch.demo.losses, losses, d.steps); $('status').textContent = `step ${t + 1} of ${d.steps}`; }
+    }
+    const params = await trainer.read();
+    trainer.destroy();
+    const ours = evaluateMlp(d.dims, params, test);
+    const worst = Math.max(...losses.map((l, t) => Math.abs(l - torch.demo.losses[t])));
+    $('result').innerHTML = `
+      <tr><td>test accuracy, your GPU</td><td class="n">${(100 * ours.accuracy).toFixed(2)}%</td></tr>
+      <tr><td>test accuracy, PyTorch float64</td><td class="n">${(100 * torch.demo.testAccuracy).toFixed(2)}%</td></tr>
+      <tr><td>largest per-step loss difference</td><td class="n">${worst.toExponential(2)}</td></tr>`;
+    $('status').textContent = 'done';
+    const host = location.hostname;
+    if (new URLSearchParams(location.search).get('record') === '1' && (host === 'localhost' || host === '127.0.0.1')) {
+      const texts = await Promise.all(SOURCE_FILES.map((f) => fetch(`../${f}`, { cache: 'no-store' }).then((r) => r.text())));
+      const body = { demo: 'web/train.html', sourceHash: hashSources(texts), adapter, steps: d.steps, losses,
+        testAccuracy: ours.accuracy, testLoss: ours.loss, maxLossDifferenceFromTorch: worst };
+      const saved = await (await fetch('/record/gpu-m3-demo.json', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json();
+      $('status').textContent = `done; recorded ${saved.saved} (power mode ${saved.power?.activeMode})`;
+    }
+    window.__demo = { losses, accuracy: ours.accuracy, worst };
+    window.__done = true;
+  };
+} catch (error) {
+  $('go').textContent = 'Unavailable';
+  $('status').innerHTML = `<span class="bad">${esc(error.message ?? error)}</span>`;
+  window.__error = String(error);
+  window.__done = true;
+}
+</script>

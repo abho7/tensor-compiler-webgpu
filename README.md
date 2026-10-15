@@ -24,7 +24,8 @@ So the first milestone is the reference that everything after it is checked agai
 | 1 | tensor IR, autodiff, float64 reference; fuzzed, and checked against PyTorch | **done** |
 | 1.5 | hardening: comparison metric v2, generator v2, per-bug detection rates | **done** |
 | 2 | every op lowered to WGSL and checked on a real GPU under a float32 budget; correctness only | **done** |
-| 3 | train an MLP, then a small transformer, in the browser; loss curves against PyTorch | not started |
+| 3a | train an MLP on the GPU, checked against PyTorch and the float64 interpreter as pre-registered | **done** |
+| 3b | train a small transformer in the browser | not started |
 | 4 | fusion and autotuning, timed against llm-inference-webgpu's hand-written kernels | not started |
 
 ## Design
@@ -184,6 +185,36 @@ batched, so it is caught in exactly the 207 batched programs. The broadcast-stri
 touches axes stretched from size 1, and 494 of 960 targeted programs only add leading axes,
 against 170 of 819 general ones; every stretching program it misses is explained (zero-valued
 tensors, or a change inside the budget). The generator was not retuned.
+
+## Milestone 3a: training an MLP on the GPU
+
+A training step is one graph in the IR: an MLP's forward pass, softmax cross-entropy,
+autodiff's backward pass, and SGD with momentum or Adam built from IR ops, so the same
+interpreter, lowering and kernels run all of it. One op was added for Adam, `sqrt`, through
+the whole pipeline. Every tolerance and test was committed in DESIGN.md (amendments 13 to 19)
+before any training ran. Nothing is timed. Results (Intel gen-12lp, Chrome, power mode recorded
+with them):
+
+- **Float64 interpreter against PyTorch float64:** all 8 golden runs (4 seeds, SGD and Adam, 50
+  steps) match every step within the pre-registered 1e-8.
+- **GPU float32 against the interpreter, teacher-forced:** 400 of 400 steps within the float32
+  budget, every node.
+- **Free-running with bounds carried:** fine for SGD; for Adam the carried bound became
+  unjudgeable within five steps in three of four runs, against what was expected. Recorded as
+  measured (DESIGN.md F4); no GPU value fell outside a bound it was judged against.
+- **After the trajectories diverge:** 24 seeds per optimizer, final loss and test accuracy
+  equivalent by the pre-registered test in all 4 comparisons.
+- **Injected bugs:** all 5 caught. The optimizer bugs only by the PyTorch training runs (the
+  GPU-against-CPU checks run the same wrong graph, as predicted); the wrong `sqrt` gradient only by
+  finite differences and the op goldens (training never differentiates `sqrt`); the kernel bounds
+  bug only by the direct tests' canaries.
+- **Demo:** [`web/train.html`](https://abho7.github.io/tensor-compiler-webgpu/web/train.html) trains
+  a digit classifier live (UCI optdigits, CC BY 4.0, checksummed) and overlays PyTorch's curve;
+  the recorded run reached 93.43% test accuracy, the same as PyTorch.
+
+CI cannot run the GPU. It checks that every recording came from the sources checked in,
+recomputes everything that needs no GPU, and checks the report against the recordings. A re-run
+of milestone 2 on the extended compiler reproduced milestone 2's results exactly.
 
 ## Known limitation: thinner log coverage since milestone 1.5
 
