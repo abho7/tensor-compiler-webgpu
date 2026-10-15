@@ -11,7 +11,14 @@ import { measureAll } from '../src/testing/measure-all.js';
 const read = (p) => JSON.parse(readFileSync(new URL(p, import.meta.url)));
 const result = measureAll({ cases: read('../golden/cases.json').cases, golden: read('../golden/torch.json'),
   gpu: { record: read('../golden/gpu-m2.json'), run1: read('../golden/gpu-m2-run1-direct.json'), oob: read('../golden/gpu-oob.json') },
-  m3: { sqrtCases: read('../golden/cases-m3.json').cases, sqrtGolden: read('../golden/torch-m3.json') } });
+  m3: {
+    sqrtCases: read('../golden/cases-m3.json').cases, sqrtGolden: read('../golden/torch-m3.json'),
+    trainSpec: read('../golden/train-spec-m3.json'), torchTrain: read('../golden/torch-train-m3.json'),
+    optdigits: {
+      optdigitsTrain: readFileSync(new URL('../data/optdigits/optdigits.tra', import.meta.url), 'utf8'),
+      optdigitsTest: readFileSync(new URL('../data/optdigits/optdigits.tes', import.meta.url), 'utf8'),
+    },
+  } });
 writeFileSync(new URL('../golden/measurements.json', import.meta.url), JSON.stringify(result, null, 1) + '\n');
 const { m1, m1_5: m } = result;
 console.log(`M1: fuzz ${m1.fuzz.agree}/${m1.fuzz.programs}; torch ${m1.torch.pass}/${m1.torch.cases}`);

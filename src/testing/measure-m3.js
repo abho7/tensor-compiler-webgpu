@@ -7,6 +7,7 @@ import { Graph } from '../ir/graph.js';
 import { compareAll } from './golden.js';
 import { corpusProgram } from './random-graph.js';
 import { sqrtFdCampaign, sqrtGoldenAnalysis } from './analyze-m3-sqrt.js';
+import { verifyCpuTraining } from '../train/verify-cpu.js';
 
 export const SQRT_FD_PROGRAMS = 400;
 export const LIMITATION_PROGRAMS = 2000;
@@ -29,13 +30,16 @@ function logCoverage(squareAware) {
   return { logNodes, programsWithLog, logOfSquarePlusC };
 }
 
-export function measureM3({ sqrtCases, sqrtGolden }) {
+export function measureM3({ sqrtCases, sqrtGolden, trainSpec, torchTrain, optdigits }) {
   return {
     m3: {
       producedBy: 'node tools/measure.js (src/testing/measure-m3.js)',
       sqrt: {
         finiteDifferences: sqrtFdCampaign(SQRT_FD_PROGRAMS),
         golden: { torch: sqrtGolden.torch, ...sqrtGoldenAnalysis(sqrtCases, sqrtGolden, { compareAll, Graph }) },
+      },
+      training: {
+        cpuVsTorch: verifyCpuTraining(trainSpec, torchTrain, optdigits),
       },
       intervalLimitation: {
         programs: LIMITATION_PROGRAMS,
