@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M3a GPU checks</title>
+<style>
+  :root { --ink: #16171b; --dim: #5c6068; --bg: #fbfbfc; --good: #15803d; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e7e9ee; --dim: #9aa1ab; --bg: #131418; --good: #4ade80; --bad: #f87171; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 ui-monospace, Consolas, monospace; }
+  main { max-width: 56rem; margin: 0 auto; padding: 2rem 1rem; }
+  .dim { color: var(--dim); } .good { color: var(--good); } .bad { color: var(--bad); }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <h1>Milestone 3a GPU checks</h1>
+  <p class="dim">The sqrt kernel's direct tests, then training checked against the float64 interpreter:
+  teacher-forced every step, free-running for five steps with bounds carried, and 24 seeds trained on the
+  GPU for the equivalence test; then each injected bug. Pre-registered in DESIGN.md amendments 13 to 18.
+  Nothing is timed. <code>?record=0</code> skips saving.</p>
+  <p id="status">starting&hellip;</p>
+  <pre id="out"></pre>
+</main>
+<script type="module">
+import { GpuRunner } from '../src/gpu/runtime.js';
+import { runSqrtDirect, runTeacherForced, runFreeRunning, runStatistical, runConsistency, runSabotage } from '../src/gpu/harness-m3.js';
+import { SOURCE_FILES, hashSources } from '../src/gpu/sources.js';
+
+const q = new URLSearchParams(location.search);
+const status = document.getElementById('status');
+const out = document.getElementById('out');
+const progress = (s) => { status.textContent = s; window.__progress = s; };
+const log = (s) => { out.textContent += s + '\n'; };
+
+try {
+  const texts = await Promise.all(SOURCE_FILES.map((f) => fetch(`../${f}`, { cache: 'no-store' }).then((r) => {
+    if (!r.ok) throw new Error(`cannot read ${f}`);
+    return r.text();
+  })));
+  const sourceHash = hashSources(texts);
+  const spec = await (await fetch('../golden/train-spec-m3.json', { cache: 'no-store' })).json();
+  const runner = await GpuRunner.create();
+  const adapter = runner.info();
+  log(`adapter: ${adapter.vendor} ${adapter.architecture} ${adapter.description}`);
+  log(`sources: ${sourceHash}`);
+
+  const direct = await runSqrtDirect(runner, { progress });
+  log(`sqrt direct: ${direct.filter((d) => d.status === 'pass').length}/${direct.length} pass`);
+  for (const d of direct.filter((x) => x.status !== 'pass')) log(`  FAIL ${d.name}: ${d.status} ${d.error ?? ''} ${JSON.stringify(d.first)} canary=${d.canaryOk}`);
+
+  const teacherForced = await runTeacherForced(runner, spec, { progress });
+  for (const r of teacherForced) log(`teacher-forced ${r.name}: ${r.passed}/${r.steps} pass, ${r.skipped} skipped, worst ${r.worst}`);
+
+  const freeRunning = await runFreeRunning(runner, spec, { progress });
+  for (const r of freeRunning) log(`free-running ${r.name}: ${r.steps.map((s) => `${s.status}(${s.worst?.toExponential(2)}, bound/value median ${s.boundToValueMedian?.toExponential(2)})`).join(' ')}`);
+
+  const consistency = await runConsistency(runner, spec);
+  log(`trainer vs checked path: ${consistency.identical ? 'identical' : 'DIFFERENT'} over ${consistency.steps} steps`);
+
+  const statistical = await runStatistical(runner, { progress });
+  log(`statistical: ${statistical.length} runs`);
+
+  const sabotage = await runSabotage(runner, spec, direct, { progress });
+  for (const s of sabotage) log(`sabotage ${s.name}: teacher-forced ${s.teacherForced.caught}/${s.teacherForced.runs}${s.direct ? `, direct ${s.direct.caught}/${s.direct.cases} (${s.direct.how})` : ''}`);
+
+  if (runner.lost) throw new Error(`device lost during the run: ${runner.lost.message}`);
+  const result = { milestone: '3a', sourceHash, adapter, direct, teacherForced, freeRunning, consistency, statistical, sabotage };
+  window.__result = result;
+  if (q.get('record') !== '0') {
+    const saved = await (await fetch('/record/gpu-m3.json', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) })).json();
+    log(`recorded: ${saved.saved}, power mode: ${saved.power?.activeMode} (on AC: ${saved.power?.onAC})`);
+  }
+  progress('done');
+  status.className = 'good';
+} catch (error) {
+  window.__error = String(error.stack ?? error);
+  status.textContent = `error: ${error.message ?? error}`;
+  status.className = 'bad';
+}
+window.__done = true;
+</script>

@@ -17,12 +17,18 @@ export const M2_SOURCE_FILES = [
   'src/gpu/direct-cases.js', 'src/gpu/harness.js', 'src/gpu/sources.js', 'web/gpu.html',
 ];
 
-/** The files that decide what the current harnesses compute. */
+/**
+ * The files that decide what the current harnesses compute (web/gpu.html's
+ * re-run of milestone 2, and milestone 3a's web/m3.html and web/train.html).
+ */
 export const SOURCE_FILES = [
   'src/ir/shapes.js', 'src/ir/graph.js', 'src/interp.js', 'src/autodiff.js',
-  'src/testing/rng.js', 'src/testing/random-graph.js',
+  'src/testing/rng.js', 'src/testing/random-graph.js', 'src/testing/sabotage.js',
   'src/gpu/bounds.js', 'src/gpu/codegen.js', 'src/gpu/lower.js', 'src/gpu/runtime.js',
   'src/gpu/direct-cases.js', 'src/gpu/harness.js', 'src/gpu/sources.js', 'web/gpu.html',
+  'src/gpu/trainer.js', 'src/gpu/direct-cases-m3.js', 'src/gpu/harness-m3.js', 'web/m3.html',
+  'src/train/data.js', 'src/train/step.js', 'src/train/cpu.js', 'src/train/golden-spec.js',
+  'web/train.html',
 ];
 
 /** FNV-1a (32-bit) over each file's text, line endings normalised, in order. */

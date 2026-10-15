@@ -633,6 +633,33 @@ F3. **An oracle run of mine overwrote milestone 1's PyTorch golden file,
     explicit input and output paths and refuses to overwrite an existing file
     without `--force`.
 
+F4. **The free-running bound lost its meaning for Adam well before K = 5**
+    (2026-10-15, first GPU run of milestone 3a). Amendment 17 expected the
+    carried bound to stay informative for five steps. For SGD it did: all four
+    golden seeds were judged through all five steps, with the median bound under
+    1e-5 of the value it bounds. For Adam it did not: of the four seeds, one was
+    judged through all five steps (with some elements' bounds already larger
+    than their values), and three became unjudgeable, at steps 2, 3 and 5,
+    because a carried bound reached the size of the denominator `sqrt(v̂) + eps`
+    it divides by, where a second moment is tiny. No GPU value fell outside its
+    bound at any judged step. Recorded as measured; K is not changed and the
+    unjudgeable steps are not counted as passes. The per-step teacher-forced
+    check, which does not carry bounds, judged every step of every run.
+
+F5. **What each check can see, measured.** As amendment 18 predicted, none
+    of the GPU-against-interpreter checks caught a bug in an optimizer's graph:
+    both sides run the same wrong graph. Only the PyTorch training goldens did,
+    every time. The wrong sqrt gradient was invisible to every training check,
+    PyTorch's included, for a reason not predicted in advance but simple: the
+    MLP never differentiates sqrt (it appears only in Adam's update, which is
+    not differentiated), so the rule is never used; only the op-level checks
+    see it. The kernel bounds bug was caught by every direct sqrt case except
+    the one whose size, 64, fills its workgroups exactly, so that no thread past
+    the end exists to slip through the faulty guard; it was invisible to the
+    teacher-forced runs, whose buffers are exact-size and whose out-of-bounds
+    writes are dropped on this adapter (milestone 2's finding). Figures in
+    `m3.training.gpu.sabotage`.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of

@@ -57,7 +57,7 @@ export function mlpLogits(g, ids) {
  * { graph, inputs: { name: id }, loss, outputs: { name: id } } where outputs
  * maps each parameter and state name to the id of its new value.
  */
-export function buildStep(dims, batch, opt, { sabotage } = {}) {
+export function buildStep(dims, batch, opt, { sabotage, rules } = {}) {
   const g = new Graph();
   const s = shapes(dims);
   const ids = {};
@@ -68,7 +68,8 @@ export function buildStep(dims, batch, opt, { sabotage } = {}) {
   // Mean negative log-likelihood of the true class.
   const loss = g.div(g.neg(g.sum(g.sum(g.mul(ids.y, logp), 1), 0)), g.const(batch));
 
-  const G = grad(g, [loss], PARAMS.map((p) => ids[p]));
+  // `rules` replaces autodiff's rule table (the sqrt-gradient sabotage uses it).
+  const G = grad(g, [loss], PARAMS.map((p) => ids[p]), rules ? { rules } : {});
   const B = G.graph;
   const grads = Object.fromEntries(PARAMS.map((p, k) => [p, G.grads[k]]));
   const state = {};

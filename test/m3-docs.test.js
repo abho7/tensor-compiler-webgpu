@@ -33,3 +33,21 @@ test("DESIGN.md's sqrt findings (F2) match golden/measurements.json", () => {
   const fd = S.finiteDifferences;
   assert.match(design, loose(`${fd.caught} of the ${fd.containing} finite-difference programs`));
 });
+
+test("the README's milestone 3a figures, and DESIGN.md F4's, match golden/measurements.json", () => {
+  const g = m3.training.gpu, c = m3.training.cpuVsTorch;
+  assert.match(readme, loose(`all ${c.runs.length} golden runs`));
+  assert.ok(c.runs.every((r) => r.pass));
+  assert.match(readme, loose(`${g.teacherForced.passed} of ${g.teacherForced.steps} steps`));
+  assert.match(readme, loose(`${g.statistical.seeds} seeds per optimizer`));
+  const eq = Object.values(g.statistical.equivalence).flatMap((x) => Object.values(x));
+  assert.ok(eq.every((x) => x.pass)); assert.match(readme, loose(`all ${eq.length} comparisons`));
+  assert.match(readme, loose(`all ${g.sabotage.bugs.length} caught`));
+  assert.match(readme, loose(`${(100 * g.demo.testAccuracy).toFixed(2)}% test accuracy`));
+  assert.equal(g.demo.testAccuracy, g.demo.torchTestAccuracy, 'the README says the same as PyTorch');
+  // F4: which Adam runs became unjudgeable, and at which step.
+  const adam = g.freeRunning.runs.filter((r) => r.name.startsWith('adam'));
+  const stuck = adam.filter((r) => r.steps.some((s) => s.status !== 'pass')).map((r) => r.steps.findIndex((s) => s.status !== 'pass') + 1).sort((a, b) => a - b);
+  assert.equal(stuck.length, 3, 'README: three of four Adam runs');
+  assert.match(design, loose(`at steps ${stuck.slice(0, -1).join(', ')} and ${stuck.at(-1)}`));
+});

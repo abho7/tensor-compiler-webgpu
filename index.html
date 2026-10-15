@@ -62,15 +62,17 @@
     GPU, and when does it lose? That needs measured numbers, including the cases where fusion
     is neutral or slower. Fused kernels are only worth timing once they are known to compute
     the same thing as the unfused ones, so the first milestone is the reference everything
-    will be checked against. <b>This page reports milestones 1 and 2 of 4, and the hardening
-    pass between them (1.5).</b> Nothing earlier has been removed: each milestone's record,
-    failures and false alarms included, is further down, unchanged.</p>
+    will be checked against. <b>This page reports milestones 1 and 2 of 4, the hardening pass
+    between them (1.5), and the first half of milestone 3 (3a: training an MLP).</b> The
+    transformer (3b) and the fusion study (4) are not done. Nothing earlier has been removed:
+    each milestone's record, failures and false alarms included, is further down, unchanged.</p>
   </div>
 
   <div class="links">
     <a href="https://github.com/abho7/tensor-compiler-webgpu"><b>Source</b> <span>&mdash; GitHub</span></a>
     <a href="https://github.com/abho7/tensor-compiler-webgpu/blob/main/DESIGN.md"><b>Design</b> <span>&mdash; ops, rules, error budget</span></a>
     <a href="golden/measurements.json"><b>Data</b> <span>&mdash; every figure on this page</span></a>
+    <a href="web/train.html"><b>Train on your GPU</b> <span>&mdash; the demo, live</span></a>
   </div>
 
   <div id="report">Loading measurements&hellip;</div>
@@ -95,7 +97,7 @@ const n = (v) => Number(v).toLocaleString('en-US');
 const pct = (a, b) => `${(100 * a / b).toFixed(1)}%`;
 
 try {
-  const { m1, m1_5: H, m2: G, m2_followup: FU } = await (await fetch('golden/measurements.json')).json();
+  const { m1, m1_5: H, m2: G, m2_followup: FU, m3: M3 } = await (await fetch('golden/measurements.json')).json();
   const f = m1.fuzz, c = m1.fuzzCentral, s = m1.secondOrder, t = m1.torch, B = m1.budgets;
   const rules = m1.sabotage.rules;
   const allCaught = rules.every((r) => r.caughtAfter !== null);
@@ -126,7 +128,145 @@ try {
   const reorder = G.sabotage.filter((x) => !x.bug);
   const T = G.targets;
 
+  const TC = M3.training.cpuVsTorch, TG = M3.training.gpu, SQ = M3.sqrt, IL = M3.intervalLimitation;
+  const optName = { sgd: 'SGD with momentum', adam: 'Adam' };
+  const metricName = { trainLoss: 'final training loss', testAccuracy: 'test accuracy' };
+  const pp = (v) => `${(100 * v).toFixed(2)} pp`;
+  const fmtDiff = (metric, v) => (metric === 'testAccuracy' ? pp(v) : sci(v));
+  const worstRun = TC.runs.reduce((a, b) => (b.worst > a.worst ? b : a));
+  const freeRuns = TG.freeRunning.runs;
+  const judgedAll = (r) => r.steps.length === TG.freeRunning.k && r.steps.every((x) => x.status === 'pass');
+  const eqAll = Object.values(TG.statistical.equivalence).flatMap((m) => Object.values(m));
+  const reasonName = { 'sqrt-on-constants': 'sqrt depends on no input', 'zero-cotangent': 'the gradient reaching sqrt is exactly zero',
+    'argument-constant': "sqrt's argument is constant in the inputs", 'below-tolerance': 'the change is inside the tolerance' };
+  const tally = (ms) => Object.entries(ms.reduce((acc, m) => { const k = `${reasonName[m.reason] ?? m.reason}${m.detail ? ` (${m.detail})` : ''}`; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}));
+  const checkName = { finiteDifferences: 'finite differences', opGoldens: 'PyTorch op goldens', directKernel: 'direct kernel tests',
+    trainingGoldens: 'PyTorch training goldens', gpuTeacherForced: 'GPU, teacher-forced' };
+  const bugName = { 'adam-bias-correction': "Adam's second-moment bias correction uses beta1", 'momentum-off-by-one': 'momentum off by one',
+    'weight-decay-sign': 'weight-decay sign flipped', 'sqrt-gradient': "sqrt's gradient missing its half", 'sqrt-bounds-off-by-one': 'sqrt kernel guard lets index n through' };
+  const curve = (series, steps) => {
+    // layout-start: chart geometry, not measurements (the docs test skips this block)
+    const W = 640, Hh = 220, L = 44, R = 10, T = 10, B = 26;
+    const ymax = Math.max(...series.flatMap((x) => x.values)) * 1.05;
+    // layout-end
+    const xp = (t) => L + (t / (steps - 1)) * (W - L - R), yp = (v) => T + (1 - v / ymax) * (Hh - T - B);
+    return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Training loss per step" style="width:100%;height:auto">
+      <line x1="${L}" y1="${Hh - B}" x2="${W - R}" y2="${Hh - B}" stroke="var(--line)"/><line x1="${L}" y1="${T}" x2="${L}" y2="${Hh - B}" stroke="var(--line)"/>
+      <text x="${L - 6}" y="${yp(ymax) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">${ymax.toFixed(2)}</text>
+      <text x="${L - 6}" y="${yp(0) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">0</text>
+      <text x="${W - R}" y="${Hh - 6}" text-anchor="end" fill="var(--faint)" font-size="11">step ${steps}</text>
+      ${series.map((x) => `<polyline fill="none" stroke="${x.color}" stroke-width="2" points="${x.values.map((v, t) => `${xp(t).toFixed(1)},${yp(v).toFixed(1)}`).join(' ')}"/>`).join('')}</svg>`;
+  };
+
   let html = `
+  <h2>Milestone 3a: an MLP trained on the GPU, correctness pre-registered</h2>
+  <p>A training step is one graph in the IR: an MLP's forward pass, softmax cross-entropy, autodiff's backward pass, and
+  SGD with momentum or Adam built from IR ops, compiled to WGSL kernels and run on the GPU with the parameters kept there.
+  One op was added for Adam, <code>sqrt</code>, through the whole pipeline. Every tolerance and test below was committed in
+  DESIGN.md before any training ran. Nothing is timed.</p>
+  <div class="wrap"><table class="claims">
+    <tr><th>check</th><th>pre-registered</th><th>observed</th></tr>
+    <tr><td>float64 interpreter against PyTorch float64, every step of the golden runs</td>
+      <td>per step, loss and every parameter: abs diff &le; ${sci(TC.tolerance)}&middot;max(1, max abs) + ${sci(TC.tolerance)}&middot;abs</td>
+      <td class="n ${TC.runs.every((r) => r.pass) ? 'good' : 'bad'}">${TC.runs.filter((r) => r.pass).length} of ${TC.runs.length} runs pass;
+        worst ${sci(worstRun.worst)} of the tolerance (${esc(worstRun.name)}, step ${worstRun.worstStep})</td></tr>
+    <tr><td>GPU float32 against the interpreter, teacher-forced, every step</td>
+      <td>every node within the float32 budget</td>
+      <td class="n ${TG.teacherForced.passed === TG.teacherForced.steps ? 'good' : 'bad'}">${n(TG.teacherForced.passed)} of ${n(TG.teacherForced.steps)} steps; worst ${sci(TG.teacherForced.worst)} of the budget</td></tr>
+    <tr><td>GPU against the interpreter, free-running, bounds carried</td>
+      <td>first ${TG.freeRunning.k} steps</td>
+      <td class="n warn">${freeRuns.filter(judgedAll).length} of ${freeRuns.length} runs judged through all ${TG.freeRunning.k} steps, none failing; see below</td></tr>
+    <tr><td>Final loss and accuracy, GPU against interpreter, ${TG.statistical.seeds} seeds &times; 2 optimizers</td>
+      <td>two one-sided t-tests, &alpha; = ${TG.statistical.alpha}; margins ${TG.statistical.margins.trainLoss} nats, ${pp(TG.statistical.margins.testAccuracy)}</td>
+      <td class="n ${eqAll.every((x) => x.pass) ? 'good' : 'bad'}">${eqAll.filter((x) => x.pass).length} of ${eqAll.length} equivalent</td></tr>
+    <tr><td>Injected bugs</td><td>each caught by at least one check</td>
+      <td class="n ${TG.sabotage.bugs.every((b) => b.caughtFirstBy) ? 'good' : 'bad'}">${TG.sabotage.bugs.filter((b) => b.caughtFirstBy).length} of ${TG.sabotage.bugs.length}</td></tr>
+  </table></div>
+  <p class="note">Recorded on ${esc(TG.adapter.vendor)} ${esc(TG.adapter.architecture)} at ${esc(TG.recorded.at)}; power mode
+  <b>${esc(TG.recorded.power.activeMode)}</b>, ${TG.recorded.power.onAC ? 'on AC' : 'on battery'}. Nothing is timed. The trainer that
+  keeps parameters on the GPU was checked against the per-step path: ${TG.consistency.identical ? 'identical, bit for bit,' : 'NOT identical'}
+  over its first ${TG.consistency.steps} steps.</p>
+
+  <h3>The demo: digits, trained live on your GPU</h3>
+  ${TG.demo ? `${curve([{ values: TG.demo.torchLosses, color: 'var(--faint)' }, { values: TG.demo.losses, color: 'var(--accent)' }], TG.demo.steps)}
+  <p>UCI's handwritten digits, a ${TG.demo.dims.inputs}&rarr;${TG.demo.dims.hidden}&rarr;${TG.demo.dims.classes} MLP, Adam, ${n(TG.demo.steps)} steps. Grey: PyTorch in float64; blue: this
+  compiler's kernels in float32 on ${esc(TG.demo.adapter.vendor)} ${esc(TG.demo.adapter.architecture)} (power mode
+  ${esc(TG.demo.recorded.power.activeMode)}). Test accuracy ${(100 * TG.demo.testAccuracy).toFixed(2)}% against PyTorch's
+  ${(100 * TG.demo.torchTestAccuracy).toFixed(2)}%; the largest per-step loss difference was ${sci(TG.demo.maxLossDifferenceFromTorch)}.
+  The float64 interpreter on the same run differs from PyTorch by at most ${sci(TC.demo.maxLossDiff)}. No tolerance was pre-registered for the
+  demo, so these are information, not a check. <a href="web/train.html">Run it yourself.</a></p>` : '<p>No demo run recorded.</p>'}
+
+  <h3>Equivalence after the trajectories diverge</h3>
+  <div class="wrap"><table>
+    <tr><th>optimizer</th><th>metric</th><th>mean GPU &minus; CPU</th><th>${Math.round(100 * (1 - 2 * TG.statistical.alpha))}% interval</th><th>margin</th><th>range over seeds</th><th></th></tr>
+    ${Object.entries(TG.statistical.equivalence).flatMap(([o, m]) => Object.entries(m).map(([k, x]) => `<tr><td>${optName[o]}</td><td>${metricName[k]}</td>
+      <td class="n">${fmtDiff(k, x.mean)}</td><td class="n">${fmtDiff(k, x.lower)} to ${fmtDiff(k, x.upper)}</td><td class="n">&plusmn;${fmtDiff(k, x.margin)}</td>
+      <td class="n">${fmtDiff(k, x.min)} to ${fmtDiff(k, x.max)}</td><td class="${x.pass ? 'good' : 'bad'}">${x.pass ? 'equivalent' : 'not shown'}</td></tr>`)).join('')}
+  </table></div>
+  <p class="note">Each seed trained ${TG.statistical.steps} steps on the GPU and on the interpreter from the same start and batches; final
+  loss and accuracy are computed by the interpreter from each run's parameters. The interpreter's side was recomputed by CI and agreed with the
+  browser's to ${sci(TG.statistical.cpuRecomputeMaxDiff)}.</p>
+
+  <h3>Free-running: where the carried bound stops meaning anything</h3>
+  <div class="wrap"><table>
+    <tr><th>run</th>${Array.from({ length: TG.freeRunning.k }, (_, t) => `<th>step ${t + 1}</th>`).join('')}</tr>
+    ${freeRuns.map((r) => `<tr><td>${esc(r.name)}</td>${Array.from({ length: TG.freeRunning.k }, (_, t) => {
+      const x = r.steps[t];
+      if (!x) return '<td class="note">&mdash;</td>';
+      return `<td class="n ${x.status === 'pass' ? '' : 'warn'}">${x.status === 'pass' ? `pass, bound/value ${sci(x.boundToValueMedian)}` : 'unjudgeable'}</td>`;
+    }).join('')}</tr>`).join('')}
+  </table></div>
+  <p>The table gives, for each judged step, the median over the parameters of the bound's size relative to the value it bounds. For SGD it
+  stays small. For Adam it grows fast, and in some runs a carried bound reached the size of the denominator <code>sqrt(v̂) + eps</code>,
+  where a second moment is tiny, so the step could not be judged at all. That went against what the pre-registration expected; it is recorded as
+  measured (DESIGN.md F4), the unjudgeable steps are not counted as passes, and no GPU value fell outside its bound at any judged step. The
+  teacher-forced check, which does not carry bounds, judged every step.</p>
+
+  <h3>Injected bugs, against every check</h3>
+  <div class="wrap"><table>
+    <tr><th>bug</th>${TG.sabotage.checkOrder.map((c) => `<th>${checkName[c]}</th>`).join('')}<th>caught first by</th></tr>
+    ${TG.sabotage.bugs.map((b) => `<tr><td>${esc(bugName[b.name] ?? b.name)}</td>${TG.sabotage.checkOrder.map((c) => {
+      const x = b.checks[c];
+      return x ? `<td class="n ${x.caught ? '' : 'note'}">${x.caught} / ${x.trials}</td>` : '<td class="note">&mdash;</td>';
+    }).join('')}<td>${b.caughtFirstBy ? checkName[b.caughtFirstBy] : '<span class="bad">nothing</span>'}</td></tr>`).join('')}
+  </table></div>
+  <p>A bug in an optimizer's graph cannot be seen by comparing the GPU with the interpreter, because both run the same wrong graph; only
+  PyTorch's runs catch it, which the pre-registration predicted. The wrong <code>sqrt</code> gradient is invisible to every training check because
+  the MLP never differentiates <code>sqrt</code> (it appears only in Adam's update); only the op-level checks see it. The kernel's bounds bug
+  was missed by the one direct case whose size fills its workgroups exactly, and by every teacher-forced run, where an out-of-bounds write
+  lands nowhere a comparison can see (DESIGN.md F5).</p>
+
+  <h3>The new op: sqrt</h3>
+  <p>Finite differences on ${n(SQ.finiteDifferences.containing)} generated programs containing <code>sqrt</code>: ${n(SQ.finiteDifferences.honestAgree)}
+  agree. PyTorch float64 on ${SQ.golden.cases} golden cases: ${SQ.golden.honestPass} pass metric v2. The wrong rule is caught in
+  ${n(SQ.finiteDifferences.caught)} of the ${n(SQ.finiteDifferences.containing)} programs and changes ${SQ.golden.flagged} of the ${SQ.golden.cases} golden cases; every miss has a
+  specific cause, in which no rule for <code>sqrt</code> could show:</p>
+  <div class="wrap"><table>
+    <tr><th>why the wrong rule went unseen</th><th>finite-difference programs</th><th>golden cases</th></tr>
+    ${(() => { const a = Object.fromEntries(tally(SQ.finiteDifferences.misses)), b = Object.fromEntries(tally(SQ.golden.misses));
+      return [...new Set([...Object.keys(a), ...Object.keys(b)])].map((k) => `<tr><td>${esc(k)}</td><td class="n">${a[k] ?? 0}</td><td class="n">${b[k] ?? 0}</td></tr>`).join(''); })()}
+  </table></div>
+  <p class="note">${SQ.golden.zeroGradients.cases} of the golden cases have an input whose gradient is exactly zero: ${SQ.golden.zeroGradients.unusedInputs} such inputs feed
+  no output, ${SQ.golden.zeroGradients.reachingInputs.length} reach one through an exact zero, and ${SQ.golden.zeroGradients.casesWithNoNonzeroGradient.length} case has no nonzero gradient at all.
+  A gradient check says nothing about those inputs.</p>
+
+  <h3>A limitation found on the way: thinner log coverage since milestone 1.5</h3>
+  <p>Generator v2 makes a <code>log</code> argument safe as <code>x&middot;x + c</code>, but its interval analysis treats the two factors of
+  <code>x&middot;x</code> as independent, so when <code>x</code> can be negative the <code>log</code> looks unbounded and is discarded. On the
+  milestone 1.5 and 2 fuzz corpus of ${n(IL.programs)} programs: ${n(IL.asRun.logNodes)} <code>log</code> nodes in ${n(IL.asRun.programsWithLog)} programs as run,
+  against ${n(IL.squareAware.logNodes)} in ${n(IL.squareAware.programsWithLog)} had <code>x&middot;x</code> been given its true interval; the
+  <code>x&middot;x + c</code> form ${n(IL.asRun.logOfSquarePlusC)} times against ${n(IL.squareAware.logOfSquarePlusC)}. Everything generated was checked; coverage
+  was thinner than assumed. The default generator is unchanged, so those milestones' records stay byte-identical (DESIGN.md F1).</p>
+
+  <h3>What these results rest on</h3>
+  <p><b>CI does not run the GPU.</b> It checks that every recording (this milestone's run, the demo run, and a re-run of milestone 2 on
+  the extended compiler, which reproduced milestone 2's results exactly) came from the sources checked in; it recomputes everything that
+  needs no GPU, including the float64 side of the statistical runs; and it checks every figure here against the recordings. A change to a
+  kernel means running <code>web/m3.html</code>, <code>web/train.html</code> and <code>web/gpu.html</code> again in a browser.</p>
+  <p><b>An oracle run of mine overwrote milestone 1's PyTorch golden file twice</b> while it was being adapted for <code>sqrt</code>; both
+  times it was restored from git and checked against its recorded hash before anything else ran, and nothing was committed in between. The
+  script now refuses to overwrite a golden file without being told to (DESIGN.md F3).</p>
+
   <h2>Milestone 2: every op lowered to WGSL, checked on a real GPU</h2>
   <div class="wrap"><table class="claims">
     <tr><th>claim</th><th>measured</th><th>checked against</th></tr>
@@ -446,7 +586,8 @@ try {
     <tr><td>1</td><td>tensor IR, autodiff, float64 reference, fuzzed and checked against PyTorch</td><td class="good">done</td></tr>
     <tr><td>1.5</td><td>hardening: metric v2, generator v2, detection rates</td><td class="good">done</td></tr>
     <tr><td>2</td><td>every op lowered to WGSL, checked on a real GPU under the float32 budget; correctness only</td><td class="good">done</td></tr>
-    <tr><td>3</td><td>train an MLP, then a small transformer, in the browser; loss curves against PyTorch</td><td>not started</td></tr>
+    <tr><td>3a</td><td>train an MLP on the GPU, checked against PyTorch and the float64 interpreter as pre-registered</td><td class="good">done</td></tr>
+    <tr><td>3b</td><td>train a small transformer in the browser</td><td>not started</td></tr>
     <tr><td>4</td><td>fusion and autotuning, timed against the hand-written kernels of llm-inference-webgpu</td><td>not started</td></tr>
   </table></div>`;
 
