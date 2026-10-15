@@ -2798,6 +2798,200 @@
     }
    }
   },
+  "training": {
+   "cpuVsTorch": {
+    "tolerance": 1e-8,
+    "torch": "2.14.1+cpu",
+    "runs": [
+     {
+      "name": "sgd-seed1",
+      "optimizer": "sgd",
+      "steps": 50,
+      "worst": 2.156368509377633e-8,
+      "worstStep": 21,
+      "maxLossDiff": 4.440892098500626e-16,
+      "pass": true
+     },
+     {
+      "name": "adam-seed1",
+      "optimizer": "adam",
+      "steps": 50,
+      "worst": 5.0790011436305666e-8,
+      "worstStep": 37,
+      "maxLossDiff": 7.771561172376096e-16,
+      "pass": true
+     },
+     {
+      "name": "sgd-seed2",
+      "optimizer": "sgd",
+      "steps": 50,
+      "worst": 2.5860329877223227e-8,
+      "worstStep": 9,
+      "maxLossDiff": 6.661338147750939e-16,
+      "pass": true
+     },
+     {
+      "name": "adam-seed2",
+      "optimizer": "adam",
+      "steps": 50,
+      "worst": 3.098284217097098e-7,
+      "worstStep": 49,
+      "maxLossDiff": 1.1102230246251565e-15,
+      "pass": true
+     },
+     {
+      "name": "sgd-seed3",
+      "optimizer": "sgd",
+      "steps": 50,
+      "worst": 2.9022603867873932e-8,
+      "worstStep": 49,
+      "maxLossDiff": 6.661338147750939e-16,
+      "pass": true
+     },
+     {
+      "name": "adam-seed3",
+      "optimizer": "adam",
+      "steps": 50,
+      "worst": 1.7520972061030633e-7,
+      "worstStep": 49,
+      "maxLossDiff": 8.881784197001252e-16,
+      "pass": true
+     },
+     {
+      "name": "sgd-seed4",
+      "optimizer": "sgd",
+      "steps": 50,
+      "worst": 1.947899233611627e-8,
+      "worstStep": 40,
+      "maxLossDiff": 4.440892098500626e-16,
+      "pass": true
+     },
+     {
+      "name": "adam-seed4",
+      "optimizer": "adam",
+      "steps": 50,
+      "worst": 0.0000010013715036469804,
+      "worstStep": 49,
+      "maxLossDiff": 6.661338147750939e-16,
+      "pass": true
+     }
+    ],
+    "sabotage": [
+     {
+      "name": "adam-bias-correction",
+      "bug": "Adam second-moment bias correction computed with beta1",
+      "trials": 4,
+      "caught": 4,
+      "detail": [
+       {
+        "name": "adam-seed1",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "adam-seed2",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "adam-seed3",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "adam-seed4",
+        "caught": true,
+        "firstStep": 0
+       }
+      ]
+     },
+     {
+      "name": "momentum-off-by-one",
+      "bug": "SGD parameter updated with the previous step's momentum buffer",
+      "trials": 4,
+      "caught": 4,
+      "detail": [
+       {
+        "name": "sgd-seed1",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "sgd-seed2",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "sgd-seed3",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "sgd-seed4",
+        "caught": true,
+        "firstStep": 0
+       }
+      ]
+     },
+     {
+      "name": "weight-decay-sign",
+      "bug": "weight-decay term subtracted from the gradient instead of added",
+      "trials": 8,
+      "caught": 8,
+      "detail": [
+       {
+        "name": "sgd-seed1",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "adam-seed1",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "sgd-seed2",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "adam-seed2",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "sgd-seed3",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "adam-seed3",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "sgd-seed4",
+        "caught": true,
+        "firstStep": 0
+       },
+       {
+        "name": "adam-seed4",
+        "caught": true,
+        "firstStep": 0
+       }
+      ]
+     }
+    ],
+    "demo": {
+     "steps": 590,
+     "maxLossDiff": 2.3314683517128287e-15,
+     "cpuTestAccuracy": 0.9343350027824151,
+     "cpuTestLoss": 0.21607939456535183,
+     "torchTestAccuracy": 0.9343350027824151,
+     "torchTestLoss": 0.21607939456535172
+    }
+   }
+  },
   "intervalLimitation": {
    "programs": 2000,
    "corpus": "the milestone 1.5 and 2 fuzz corpus (corpusProgram 1..N)",
