@@ -44,7 +44,7 @@ export function broadcastsTo(from, to) {
   return from.every((d, i) => d === 1 || d === to[lead + i]);
 }
 
-const UNARY = new Set(['neg', 'exp', 'log', 'relu', 'tanh', 'step', 'stopGradient']);
+const UNARY = new Set(['neg', 'exp', 'log', 'relu', 'tanh', 'step', 'stopGradient', 'sqrt']);
 const BINARY = new Set(['add', 'sub', 'mul', 'div']);
 const REDUCE = new Set(['sum', 'max']);
 

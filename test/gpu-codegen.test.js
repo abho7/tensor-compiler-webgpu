@@ -12,12 +12,18 @@ import { Rng } from '../src/testing/rng.js';
 import { size } from '../src/ir/shapes.js';
 
 const snapshot = JSON.parse(readFileSync(new URL('../golden/wgsl.json', import.meta.url)));
+const snapshotM3 = JSON.parse(readFileSync(new URL('../golden/wgsl-m3.json', import.meta.url)));
 
-test('every kernel matches its committed WGSL snapshot', () => {
-  // A change to any kernel's text shows up here, and must be re-recorded with
-  // node tools/snapshot-wgsl.js (which also makes the GPU results stale).
-  for (const kind of KERNEL_KINDS) assert.equal(kernelSource(kind), snapshot.kernels[kind], `${kind} changed`);
-  assert.deepEqual(Object.keys(snapshot.kernels).sort(), [...KERNEL_KINDS].sort());
+test("milestone 2's kernels are byte-identical to its snapshot", () => {
+  // golden/wgsl.json is milestone 2's record and is never rewritten.
+  for (const kind of Object.keys(snapshot.kernels)) assert.equal(kernelSource(kind), snapshot.kernels[kind], `${kind} changed`);
+});
+
+test('every kernel since milestone 2 matches its own snapshot', () => {
+  // New kernels are recorded in golden/wgsl-m3.json by node tools/snapshot-wgsl.js.
+  const later = KERNEL_KINDS.filter((k) => !(k in snapshot.kernels));
+  for (const kind of later) assert.equal(kernelSource(kind), snapshotM3.kernels[kind], `${kind} changed`);
+  assert.deepEqual(Object.keys(snapshotM3.kernels).sort(), later.sort());
 });
 
 test('1-D kernels bounds-check the thread index before any access', () => {

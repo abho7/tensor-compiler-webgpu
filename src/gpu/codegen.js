@@ -24,6 +24,7 @@ const UNARY = {
   // this project's adapter returns NaN from |x| >= 89 (DESIGN.md revision R2).
   // tanh(20) = 1 - 8.5e-18, exactly 1 in float32, so the clamp loses nothing.
   tanh: (x) => `tanh(clamp(${x}, -20.0, 20.0))`,
+  sqrt: (x) => `sqrt(${x})`,
   step: (x) => `select(0.0, 1.0, ${x} > 0.0)`,
   copy: (x) => x,
 };
@@ -45,7 +46,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
 function elementwise(op, sabotage) {
   // The sabotaged variant still reads P (a phony assignment), or the 'auto'
   // pipeline layout would drop the binding and every launch would fail to bind.
-  const guard = sabotage === 'elementwise-no-bounds-check' ? '  _ = P[0];\n' : '  if (i >= P[0]) { return; }\n';
+  const guard = sabotage === 'elementwise-no-bounds-check' ? '  _ = P[0];\n'
+    // Milestone 3a's kernel bounds bug: the sqrt kernel's guard lets index n through.
+    : sabotage === 'sqrt-bounds-off-by-one' && op === 'sqrt' ? '  if (i > P[0]) { return; }\n'
+    : '  if (i >= P[0]) { return; }\n';
   const isBinary = op in BINARY;
   const expr = isBinary ? `A[i] ${BINARY[op]} B[i]` : UNARY[op]('A[i]');
   return `${bindings(isBinary ? ['A', 'B'] : ['A'])}

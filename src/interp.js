@@ -60,6 +60,7 @@ export const KERNELS = {
   log: map1(Math.log),
   relu: map1((x) => (x > 0 ? x : 0)),
   tanh: map1(Math.tanh),
+  sqrt: map1(Math.sqrt),
   step: map1((x) => (x > 0 ? 1 : 0)),
   stopGradient: map1((x) => x),
 

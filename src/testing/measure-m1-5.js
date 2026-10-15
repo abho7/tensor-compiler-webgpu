@@ -4,7 +4,7 @@
 
 import { corpusProgram, TARGETS, MAX_SIZE } from './random-graph.js';
 import { checkGradients, secondOrder } from './gradcheck.js';
-import { RULE_SABOTAGE, sabotagedRules } from './sabotage.js';
+import { RULE_SABOTAGE, M1_SABOTAGED_RULES, sabotagedRules } from './sabotage.js';
 import { compareAll, RTOL, ATOL_SCALE, GOLDEN_TOLERANCE } from './golden.js';
 import { RULES } from '../autodiff.js';
 
@@ -49,7 +49,7 @@ function fuzz(programs, check) {
  * is the v2 corpus, split by source.
  */
 function detection(programs, m1) {
-  return Object.entries(RULE_SABOTAGE).map(([rule, { bug }]) => {
+  return M1_SABOTAGED_RULES.map((rule) => [rule, RULE_SABOTAGE[rule]]).map(([rule, { bug }]) => {
     const rules = sabotagedRules(rule);
     const old = m1.sabotage.rules.find((r) => r.rule === rule);
     const before = { containing: old.containing, caught: old.caught };
@@ -101,7 +101,8 @@ function metric(cases, golden) {
   });
 
   // (b) one rule at a time, its contribution multiplied by 1 + 1e-4.
-  const perRule = Object.keys(RULES).filter((op) => !['step', 'stopGradient', 'max'].includes(op)).map((op) => {
+  // The rules as of milestone 1.5 (frozen, so a later op does not add a row).
+  const perRule = M1_SABOTAGED_RULES.filter((op) => op !== 'stopGradient').map((op) => {
     const rules = { ...RULES, [op]: (G, n, gy) => RULES[op](G, n, gy).map((c) => (c === null ? null : G.mul(c, G.const(INJECTED)))) };
     const r = compareAll(cases, golden, { rules });
     const out = { op, affected: 0, flagged: 0, missed: [] };

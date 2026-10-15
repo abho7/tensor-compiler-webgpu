@@ -4,7 +4,10 @@
 // that the recording came from the sources checked in (test/gpu-record.test.js)
 // and that this summary is what the code makes of it.
 
-import { KERNEL_KINDS, TILE, WG } from '../gpu/codegen.js';
+import { TILE, WG } from '../gpu/codegen.js';
+
+/** The kernels milestone 2 recorded, frozen: later milestones add kernels. */
+const M2_KERNELS = ['neg', 'exp', 'log', 'relu', 'tanh', 'step', 'copy', 'add', 'sub', 'mul', 'div', 'gather', 'sum', 'max', 'matmul-naive', 'matmul-tiled'];
 import { S, U, EPS, TAU } from '../gpu/bounds.js';
 
 const rate = (x) => ({ containing: x.containing, caught: x.caught, caughtByOutputs: x.caughtByOutputs });
@@ -38,7 +41,7 @@ export function measureM2({ record, run1 }) {
       budget: { safetyFactor: S, unitRoundoff: U, ulpFactor: EPS, smallestNormal: TAU, divisionUlp: 2.5 },
       tile: TILE,
       workgroup: WG,
-      kernels: KERNEL_KINDS,
+      kernels: M2_KERNELS,
       direct: {
         cases: direct.length,
         pass: direct.filter((d) => d.status === 'pass').length,
