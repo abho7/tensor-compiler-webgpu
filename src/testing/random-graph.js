@@ -50,7 +50,7 @@ const mulIv = ([a, b], [c, d]) => {
 const magnitude = ([lo, hi]) => Math.max(Math.abs(lo), Math.abs(hi));
 
 /** The interval of a node's value, given its inputs' intervals. Sound, not tight. */
-function interval(g, id, iv) {
+function interval(g, id, iv, squareAware = false) {
   const n = g.nodes[id];
   const [a, b] = n.inputs.map((i) => iv.get(i));
   switch (n.op) {
@@ -61,7 +61,15 @@ function interval(g, id, iv) {
     }
     case 'add': return [a[0] + b[0], a[1] + b[1]];
     case 'sub': return [a[0] - b[1], a[1] - b[0]];
-    case 'mul': return mulIv(a, b);
+    case 'mul':
+      // x*x is never negative, but plain interval arithmetic treats the two
+      // factors as independent. Off by default, which is what milestones 1.5
+      // and 2 ran with; on only to measure what that cost (DESIGN.md).
+      if (squareAware && n.inputs[0] === n.inputs[1]) {
+        const m = magnitude(a), lo = a[0] <= 0 && a[1] >= 0 ? 0 : Math.min(a[0] * a[0], a[1] * a[1]);
+        return [lo, m * m];
+      }
+      return mulIv(a, b);
     case 'div':
       if (b[0] <= 0 && b[1] >= 0) return [-Infinity, Infinity];
       return mulIv(a, [1 / b[1], 1 / b[0]]);
@@ -71,6 +79,7 @@ function interval(g, id, iv) {
     case 'relu': return [Math.max(0, a[0]), Math.max(0, a[1])];
     case 'step': return [0, 1];
     case 'tanh': return [Math.tanh(a[0]), Math.tanh(a[1])];
+    case 'sqrt': return a[0] >= 0 ? [Math.sqrt(a[0]), Math.sqrt(a[1])] : [-Infinity, Infinity];
     case 'matmul': {
       const k = g.shape(n.inputs[0]).at(-1);
       // A sum of k products, each within the product interval.
@@ -118,13 +127,14 @@ class Builder {
     // overflow or flush where float64 would not. Off by default, which leaves
     // every v2 program exactly as milestone 1.5 recorded it.
     this.f32 = false;
+    this.squareAware = false;
   }
 
   /** Record a node's interval; returns the id, or undefined if it is too large. */
   track(id) {
     if (!this.iv.has(id)) {
       // Builder helpers may have emitted intermediate nodes (broadcasts).
-      for (let i = 0; i <= id; i++) if (!this.iv.has(i)) this.iv.set(i, interval(this.g, i, this.iv));
+      for (let i = 0; i <= id; i++) if (!this.iv.has(i)) this.iv.set(i, interval(this.g, i, this.iv, this.squareAware));
     }
     return id;
   }
@@ -189,6 +199,19 @@ class Builder {
     return hi <= 4 && (!this.f32 || lo >= -40) ? x : this.track(this.g.tanh(x));
   }
 
+  /**
+   * A value with x's shape whose interval is at least 0.2 (sqrt's derivative
+   * is large near 0). Not x*x + c, as safeLogArgument does: interval
+   * arithmetic cannot see that both factors are the same value, so when x's
+   * interval straddles zero, x*x gets a negative lower bound and the op is
+   * discarded (DESIGN.md, milestone 3a revisions). exp(x) + c has an interval
+   * that really is positive.
+   */
+  safeSqrtArgument(x) {
+    if (this.iv.get(x)[0] >= 0.1) return x;
+    return this.track(this.g.add(this.g.exp(this.boundedForExp(x)), this.scalarConst(0.2, 1)));
+  }
+
   /** A value with x's shape whose interval is strictly positive. */
   safeLogArgument(x) {
     if (this.iv.get(x)[0] >= 0.1) return x;
@@ -226,6 +249,7 @@ class Builder {
       }
       case 'log': return g.log(this.safeLogArgument(this.first()));
       case 'exp': return g.exp(this.boundedForExp(this.first()));
+      case 'sqrt': return g.sqrt(this.safeSqrtArgument(this.first()));
       case 'neg': case 'relu': case 'tanh': return g[op](this.first());
       case 'matmul': return this.matmul(this.first());
       case 'sum': {
@@ -376,10 +400,11 @@ const TARGETED = {
  * otherwise it is a general program over every op. `f32` turns on the
  * float32 guards.
  */
-export function randomProgram(seed, { focus, f32 = false } = {}) {
+export function randomProgram(seed, { focus, f32 = false, withSqrt = false, squareAware = false } = {}) {
   const rng = new Rng(focus ? (seed * 31 + TARGETS.indexOf(focus) + 1) >>> 0 : seed);
   const b = new Builder(rng);
   b.f32 = f32;
+  b.squareAware = squareAware;
   let last;
 
   if (focus) {
@@ -394,7 +419,9 @@ export function randomProgram(seed, { focus, f32 = false } = {}) {
     }
   } else {
     for (let i = rng.int(1, 3); i > 0; i--) b.input(b.shape());
-    const ops = Object.entries(GENERATED).flatMap(([op, w]) => Array(w).fill(op));
+    // withSqrt (milestone 3a) adds sqrt to the mix; off, the programs are
+    // exactly milestone 1.5's and 2's.
+    const ops = Object.entries(withSqrt ? { ...GENERATED, sqrt: 3 } : GENERATED).flatMap(([op, w]) => Array(w).fill(op));
     const steps = rng.int(2, 10);
     let made = 0;
     for (let attempt = 0; made < steps && attempt < steps * 20; attempt++) {
@@ -411,7 +438,7 @@ export function randomProgram(seed, { focus, f32 = false } = {}) {
   return {
     seed, focus: focus ?? null, graph: b.g, outputs, inputs: b.g.inputs().map((n) => n.attrs.name),
     // Each node's interval, for testing that the analysis is sound.
-    bounds: b.g.nodes.map((n) => b.iv.get(n.id) ?? interval(b.g, n.id, b.iv)),
+    bounds: b.g.nodes.map((n) => b.iv.get(n.id) ?? interval(b.g, n.id, b.iv, b.squareAware)),
   };
 }
 
@@ -434,7 +461,7 @@ function tryOp(b, op, operand) {
  * The fuzzing corpus for program index i: alternately a general program and a
  * targeted one, cycling through TARGETS.
  */
-export function corpusProgram(i, { f32 = false } = {}) {
-  if (i % 2 === 1) return randomProgram(i, { f32 });
-  return randomProgram(i, { focus: TARGETS[(i / 2) % TARGETS.length], f32 });
+export function corpusProgram(i, { f32 = false, withSqrt = false, squareAware = false } = {}) {
+  if (i % 2 === 1) return randomProgram(i, { f32, withSqrt, squareAware });
+  return randomProgram(i, { focus: TARGETS[(i / 2) % TARGETS.length], f32, withSqrt, squareAware });
 }

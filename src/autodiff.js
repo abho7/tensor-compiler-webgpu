@@ -38,6 +38,8 @@ export const RULES = {
   log: (G, n, gy) => [G.div(gy, n.inputs[0])],
   relu: (G, n, gy) => [G.mul(gy, G.step(n.inputs[0]))],
   tanh: (G, n, gy) => [G.mul(gy, G.sub(G.const(1), G.mul(n.id, n.id)))],
+  // d sqrt(x) = g / (2 sqrt(x)), from the result y.
+  sqrt: (G, n, gy) => [G.div(gy, G.mul(G.const(2), n.id))],
   matmul: (G, n, gy) => {
     const [a, b] = n.inputs;
     return [G.matmul(gy, G.transposeLast2(b)), G.matmul(G.transposeLast2(a), gy)];

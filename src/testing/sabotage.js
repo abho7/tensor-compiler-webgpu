@@ -96,7 +96,20 @@ export const RULE_SABOTAGE = {
     bug: 'lets the gradient through, like identity',
     rule: (G, n, gy) => [gy],
   },
+  // Milestone 3a (DESIGN.md amendment 18).
+  sqrt: {
+    bug: 'missing the factor of one half: g / y',
+    rule: (G, n, gy) => [G.div(gy, n.id)],
+  },
 };
+
+/**
+ * The rules milestones 1 and 1.5 sabotaged, frozen in their order: their
+ * records iterate this list, so a rule added later (sqrt, milestone 3a) does
+ * not change them.
+ */
+export const M1_SABOTAGED_RULES = ['add', 'sub', 'mul', 'div', 'neg', 'exp', 'log', 'relu', 'tanh',
+  'matmul', 'sum', 'broadcast', 'reshape', 'transpose', 'stopGradient'];
 
 /** Rules with the one named rule replaced by its sabotaged version. */
 export function sabotagedRules(name) {

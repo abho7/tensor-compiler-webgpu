@@ -185,6 +185,17 @@ touches axes stretched from size 1, and 494 of 960 targeted programs only add le
 against 170 of 819 general ones; every stretching program it misses is explained (zero-valued
 tensors, or a change inside the budget). The generator was not retuned.
 
+## Known limitation: thinner log coverage since milestone 1.5
+
+Generator v2 (milestone 1.5) makes a `log` argument safe as `x*x + c`, but its interval
+analysis treats the two factors of `x*x` as independent. When `x` can be negative, `x*x`
+looks possibly negative, the `log` looks unbounded, and the op is discarded. On the
+milestone 1.5 and 2 fuzz corpus of 2,000 programs that left 564 `log` nodes in 451
+programs, against 738 in 556 had `x*x` been given its true interval, and the `x*x + c`
+form 18 times against 229. Everything generated was checked; coverage of `log` was
+thinner than assumed. The default generator is left as it was, so those milestones'
+records stay byte-identical. Details in DESIGN.md (F1); the figures are recomputed by CI.
+
 ## Running it
 
 ```

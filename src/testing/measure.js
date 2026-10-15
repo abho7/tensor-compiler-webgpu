@@ -5,7 +5,7 @@
 
 import { randomProgram, GENERATED } from './random-graph-v1.js';
 import { checkGradients, secondOrder, TOLERANCE } from './gradcheck.js';
-import { RULE_SABOTAGE, sabotagedRules, KERNEL_SABOTAGE, sabotagedKernels } from './sabotage.js';
+import { RULE_SABOTAGE, M1_SABOTAGED_RULES, sabotagedRules, KERNEL_SABOTAGE, sabotagedKernels } from './sabotage.js';
 import { compareAll, GOLDEN_TOLERANCE } from './golden.js';
 
 export const FUZZ_PROGRAMS = 3000;
@@ -37,7 +37,7 @@ function campaign(count, check) {
 const REACHED_BY = { stopGradient: 'max' };
 
 function sabotage() {
-  return Object.entries(RULE_SABOTAGE).map(([rule, { bug }]) => {
+  return M1_SABOTAGED_RULES.map((rule) => [rule, RULE_SABOTAGE[rule]]).map(([rule, { bug }]) => {
     const rules = sabotagedRules(rule);
     let first = null;
     let containing = 0, caught = 0;

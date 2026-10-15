@@ -45,6 +45,8 @@ def run_graph(graph, leaves):
             v = torch.relu(ins[0])
         elif op == "tanh":
             v = torch.tanh(ins[0])
+        elif op == "sqrt":
+            v = torch.sqrt(ins[0])
         elif op == "step":
             v = (ins[0] > 0).to(F64)
         elif op == "stopGradient":
@@ -104,7 +106,19 @@ def evaluate(case):
 
 
 def main():
-    cases = json.loads((ROOT / "golden" / "cases.json").read_text())["cases"]
+    # Explicit paths, and no overwriting a golden file by accident: an earlier
+    # run with defaults rewrote golden/torch.json (identically, as it turned
+    # out) when only milestone 3a's file was meant.
+    #   torch_golden.py golden/cases.json golden/torch.json --force
+    #   torch_golden.py golden/cases-m3.json golden/torch-m3.json
+    import sys
+    args = [a for a in sys.argv[1:] if a != "--force"]
+    if len(args) != 2:
+        sys.exit("usage: torch_golden.py <cases.json> <out.json> [--force]")
+    src, dst = ROOT / args[0], ROOT / args[1]
+    if dst.exists() and "--force" not in sys.argv:
+        sys.exit(f"{dst} exists; pass --force to overwrite a golden file")
+    cases = json.loads(src.read_text())["cases"]
     out = {
         "producedBy": "oracle/torch_golden.py",
         "torch": torch.__version__,
@@ -112,7 +126,7 @@ def main():
         "dtype": "float64",
         "cases": [evaluate(c) for c in cases],
     }
-    (ROOT / "golden" / "torch.json").write_text(json.dumps(out) + "\n")
+    dst.write_text(json.dumps(out) + "\n")
     print(f"wrote {len(out['cases'])} cases with torch {torch.__version__}")
 
 

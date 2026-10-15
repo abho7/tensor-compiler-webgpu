@@ -2655,5 +2655,162 @@
     }
    ]
   }
+ },
+ "m3": {
+  "producedBy": "node tools/measure.js (src/testing/measure-m3.js)",
+  "sqrt": {
+   "finiteDifferences": {
+    "programs": 400,
+    "containing": 146,
+    "honestAgree": 146,
+    "honestOther": [],
+    "caught": 126,
+    "misses": [
+     {
+      "seed": 26,
+      "reason": "sqrt-on-constants"
+     },
+     {
+      "seed": 50,
+      "reason": "zero-cotangent",
+      "detail": "a softmax over a size-1 axis"
+     },
+     {
+      "seed": 55,
+      "reason": "argument-constant",
+      "detail": "x - x"
+     },
+     {
+      "seed": 89,
+      "reason": "argument-constant",
+      "detail": "x - x"
+     },
+     {
+      "seed": 94,
+      "reason": "argument-constant",
+      "detail": "a softmax over a size-1 axis"
+     },
+     {
+      "seed": 131,
+      "reason": "sqrt-on-constants"
+     },
+     {
+      "seed": 139,
+      "reason": "argument-constant",
+      "detail": "x - x"
+     },
+     {
+      "seed": 160,
+      "reason": "argument-constant",
+      "detail": "x - x"
+     },
+     {
+      "seed": 213,
+      "reason": "sqrt-on-constants"
+     },
+     {
+      "seed": 227,
+      "reason": "sqrt-on-constants"
+     },
+     {
+      "seed": 229,
+      "reason": "argument-constant",
+      "detail": "x - x"
+     },
+     {
+      "seed": 247,
+      "reason": "below-tolerance",
+      "ratio": 1.6576550783193787e-10,
+      "detail": "y / y"
+     },
+     {
+      "seed": 260,
+      "reason": "argument-constant",
+      "detail": "a softmax over a size-1 axis"
+     },
+     {
+      "seed": 279,
+      "reason": "argument-constant",
+      "detail": "x - x"
+     },
+     {
+      "seed": 295,
+      "reason": "zero-cotangent",
+      "detail": "x - x"
+     },
+     {
+      "seed": 336,
+      "reason": "argument-constant",
+      "detail": "a softmax over a size-1 axis"
+     },
+     {
+      "seed": 341,
+      "reason": "sqrt-on-constants"
+     },
+     {
+      "seed": 359,
+      "reason": "zero-cotangent",
+      "detail": "x - x"
+     },
+     {
+      "seed": 365,
+      "reason": "sqrt-on-constants"
+     },
+     {
+      "seed": 397,
+      "reason": "argument-constant",
+      "detail": "x - x"
+     }
+    ]
+   },
+   "golden": {
+    "torch": "2.14.1+cpu",
+    "cases": 34,
+    "honestPass": 34,
+    "flagged": 31,
+    "misses": [
+     {
+      "name": "sqrt-random-26",
+      "reason": "sqrt-on-constants"
+     },
+     {
+      "name": "sqrt-random-50",
+      "reason": "zero-cotangent",
+      "detail": "a softmax over a size-1 axis"
+     },
+     {
+      "name": "sqrt-random-55",
+      "reason": "argument-constant",
+      "detail": "x - x"
+     }
+    ],
+    "zeroGradients": {
+     "cases": 15,
+     "inputs": 21,
+     "unusedInputs": 19,
+     "reachingInputs": [
+      "sqrt-random-50:x1",
+      "sqrt-random-53:x1"
+     ],
+     "casesWithNoNonzeroGradient": [
+      "sqrt-random-50"
+     ]
+    }
+   }
+  },
+  "intervalLimitation": {
+   "programs": 2000,
+   "corpus": "the milestone 1.5 and 2 fuzz corpus (corpusProgram 1..N)",
+   "asRun": {
+    "logNodes": 564,
+    "programsWithLog": 451,
+    "logOfSquarePlusC": 18
+   },
+   "squareAware": {
+    "logNodes": 738,
+    "programsWithLog": 556,
+    "logOfSquarePlusC": 229
+   }
+  }
  }
 }

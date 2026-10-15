@@ -94,6 +94,7 @@ export class Graph {
   log(x) { return this.emit('log', [x]); }
   relu(x) { return this.emit('relu', [x]); }
   tanh(x) { return this.emit('tanh', [x]); }
+  sqrt(x) { return this.emit('sqrt', [x]); }
   step(x) { return this.emit('step', [x]); }
   stopGradient(x) { return this.emit('stopGradient', [x]); }
 

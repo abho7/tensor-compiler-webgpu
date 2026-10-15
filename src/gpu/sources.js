@@ -3,6 +3,21 @@
 // the checked-out files and fails if they differ, so GPU results cannot
 // silently outlive the code that produced them.
 
+/**
+ * Milestone 2's recording (golden/gpu-m2.json) was made at this commit, from
+ * these files. Milestone 3a added an op, which edits several of them, so the
+ * check that the recording came from its sources reads them from git history
+ * at this commit (DESIGN.md amendment 19).
+ */
+export const M2_COMMIT = '8f45285';
+export const M2_SOURCE_FILES = [
+  'src/ir/shapes.js', 'src/ir/graph.js', 'src/interp.js', 'src/autodiff.js',
+  'src/testing/rng.js', 'src/testing/random-graph.js',
+  'src/gpu/bounds.js', 'src/gpu/codegen.js', 'src/gpu/lower.js', 'src/gpu/runtime.js',
+  'src/gpu/direct-cases.js', 'src/gpu/harness.js', 'src/gpu/sources.js', 'web/gpu.html',
+];
+
+/** The files that decide what the current harnesses compute. */
 export const SOURCE_FILES = [
   'src/ir/shapes.js', 'src/ir/graph.js', 'src/interp.js', 'src/autodiff.js',
   'src/testing/rng.js', 'src/testing/random-graph.js',

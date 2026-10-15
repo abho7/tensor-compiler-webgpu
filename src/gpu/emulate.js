@@ -20,7 +20,7 @@ import { KERNELS } from '../interp.js';
 
 const UNARY = {
   neg: (x) => -x, exp: Math.exp, log: Math.log, relu: (x) => (x > 0 ? x : 0),
-  tanh: Math.tanh, step: (x) => (x > 0 ? 1 : 0), copy: (x) => x,
+  tanh: Math.tanh, sqrt: Math.sqrt, step: (x) => (x > 0 ? 1 : 0), copy: (x) => x,
 };
 const BINARY = { add: (a, b) => a + b, sub: (a, b) => a - b, mul: (a, b) => a * b, div: (a, b) => a / b };
 

@@ -140,7 +140,9 @@ export function checkGradients(program, { seed = 1, rules = RULES, kernels = KER
         if (!(err <= worst)) { worst = err; detail = `${name}[${j}]: autodiff ${a}, finite difference ${f}`; }
       }
     });
-    return { status: worst <= tolerance ? 'agree' : 'mismatch', worst, rejections, elements, detail };
+    // point: the inputs and output weights this verdict was reached at, for
+    // explaining a result afterwards (milestone 3a); no record stores it.
+    return { status: worst <= tolerance ? 'agree' : 'mismatch', worst, rejections, elements, detail, point: { inputs, w } };
   }
   return { status: 'rejected', worst: 0, rejections, elements: 0, detail: `no usable point in ${tries} draws` };
 }

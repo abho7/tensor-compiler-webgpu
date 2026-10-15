@@ -583,6 +583,56 @@ before and after.
     a new file, and must reproduce M2's results exactly; that is what shows the
     extension changed nothing M2 measured.
 
+### Milestone 3a findings and revisions
+
+F1. **A limitation of generator v2's interval analysis, present since
+    milestone 1.5** (found 2026-10-14, while adding sqrt). Plain interval
+    arithmetic treats the two factors of `x*x` as independent, so when `x`'s
+    interval straddles zero, `x*x` gets a negative lower bound. Generator v2
+    makes a `log` argument safe as `x*x + c`; that argument then looks possibly
+    negative, the `log`'s interval comes out unbounded, and the op is
+    discarded. It survives only when `x`'s interval is already non-negative.
+    Measured on the milestone 1.5 and 2 fuzz corpus (`corpusProgram` 1 to
+    2,000), against the same corpus with `x*x` given its true interval: 564
+    `log` nodes in 451 programs as run, against 738 in 556; and the `x*x + c`
+    form 18 times against 229. So that corpus had about 24% fewer `log` nodes
+    and 19% fewer programs containing `log` than intended, and the `x*x + c`
+    form at under 8% of its intended rate; `log` reached the corpus mostly
+    through its `exp(...)` branch. Milestone 1's generator (v1) does not use
+    intervals and is unaffected. Nothing measured is wrong: every `log` that
+    was generated was checked. Coverage was thinner than assumed. The default
+    generator is not changed, because milestones 1.5 and 2's records must stay
+    byte-identical; the true-interval version exists only behind an option
+    (`squareAware`), to measure this. `sqrt` (amendment 13) makes its argument
+    safe as `exp(x) + c` instead, whose interval really is positive. The
+    figures are recomputed by CI (`m3.intervalLimitation` in
+    `golden/measurements.json`).
+
+F2. **What the sqrt goldens check, and what the wrong sqrt rule escapes.** Of
+    the 34 PyTorch golden cases for sqrt, 15 have at least one input whose
+    gradient is exactly zero: 19 such inputs feed no output (the generator
+    creates inputs it may not use), 2 reach an output through an exact zero,
+    and one case (`sqrt-random-50`, a log-softmax over a size-1 axis) has no
+    nonzero gradient at all. The wrong rule (`g / y`) still changes 31 of the
+    34 cases beyond metric v2, and 126 of the 146 finite-difference programs
+    containing sqrt. Every miss, in both, has a specific cause: sqrt depending
+    on no input; its argument constant in the inputs (an `x - x`, or a
+    descendant of a softmax over a size-1 axis, which is constant); the gradient
+    arriving at it exactly zero (an `x - x` downstream, or such a softmax); or
+    sqrt entering only as `y / y`, whose true gradient is zero. None is a
+    weakness of the check; each is a program in which no rule for sqrt could
+    show. Recorded per program in `m3.sqrt`.
+
+F3. **An oracle run of mine overwrote milestone 1's PyTorch golden file,
+    twice.** `oracle/torch_golden.py` wrote to a hard-coded
+    `golden/torch.json`. Run for the sqrt cases before its paths were
+    parameterised, it rewrote that file: the first time with identical bytes
+    (the same cases), the second time with the 34 sqrt cases. Both times it was
+    restored from git and its SHA-256 checked against the recorded value before
+    anything else ran; nothing was committed in between. The script now takes
+    explicit input and output paths and refuses to overwrite an existing file
+    without `--force`.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of

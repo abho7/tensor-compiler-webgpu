@@ -44,6 +44,13 @@ const ELEMENTWISE = {
     return inherited + Math.max(2 ** -21, 3 * EPS * (Math.abs(r) + inherited));
   },
   tanh: (r, [x], [ex]) => ex + Math.max(1e-5, (9.5 + 4 * (Math.abs(x) + ex)) * EPS),
+  // Amendment 13: inherited from 1/inverseSqrt(x), 2 + 2.5 ULP; sqrt is
+  // 1/2-Hölder, so the inherited part stays finite even when e_x reaches x.
+  sqrt: (r, [x], [ex]) => {
+    if (x < 0) return Infinity;
+    const inherited = x > 0 ? Math.min(Math.sqrt(ex), ex / Math.sqrt(x)) : Math.sqrt(ex);
+    return inherited + 4.5 * EPS * Math.abs(r);
+  },
   step: (r, [x], [ex]) => (ex > 0 && Math.abs(x) <= ex ? 1 : 0),
 };
 

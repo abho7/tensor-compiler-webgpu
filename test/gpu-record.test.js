@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { SOURCE_FILES, hashSources } from '../src/gpu/sources.js';
+import { execFileSync } from 'node:child_process';
+import { M2_COMMIT, M2_SOURCE_FILES, hashSources } from '../src/gpu/sources.js';
 
 const root = new URL('../', import.meta.url);
 const text = (p) => readFileSync(new URL(p, root), 'utf8');
@@ -19,11 +20,13 @@ test('the milestone 1 and 1.5 records and golden cases are byte-identical to mil
   assert.equal(sha(JSON.stringify(m.m1_5)), '3a03d951dc9a106e9826c2c472b51bddc7ff37b5645e911000edebe10400fbaf');
 });
 
-test('the recorded GPU results came from the sources checked in', () => {
-  // A change to any file that decides what the harness computes makes the
-  // recording stale; rerun web/gpu.html to re-record.
+test('the recorded M2 GPU results came from the sources at the M2 commit', () => {
+  // Pinned to the commit the recording was made at (DESIGN.md amendment 19):
+  // milestone 3a edits some of these files, so they are read from git history.
+  // CI checks out the full history for this.
   const record = json('golden/gpu-m2.json');
-  assert.equal(record.sourceHash, hashSources(SOURCE_FILES.map(text)));
+  const atCommit = (f) => execFileSync('git', ['show', `${M2_COMMIT}:${f}`], { cwd: new URL('../', import.meta.url), encoding: 'utf8', maxBuffer: 64e6 });
+  assert.equal(record.sourceHash, hashSources(M2_SOURCE_FILES.map(atCommit)));
 });
 
 test('the GPU record names its adapter and the power mode it ran under', () => {
