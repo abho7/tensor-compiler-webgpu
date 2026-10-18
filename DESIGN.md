@@ -677,6 +677,241 @@ F6. **F1 understated the limitation: `div` lost more coverage than `log`**
     default generator stays as it was. The figures are recomputed by CI
     (`m3.intervalLimitation`).
 
+### Milestone 3b preconditions (2026-10-18), committed before any model code exists or runs
+
+Milestone 3b trains a small character-level transformer in the browser on the
+GPU. Nothing is timed and nothing is fused (that is milestone 4). Everything
+below was written before any transformer code existed or ran; it is amended
+only by dated revisions with before and after.
+
+20. **The model.** Decoder-only, pre-LayerNorm, learned position embeddings,
+    causal multi-head attention, a GELU (tanh form) MLP, a final LayerNorm and
+    an untied output head. Exactly:
+    - context `T = 64`, width `d = 64`, `H = 4` heads of `d_h = 16`, `L = 2`
+      blocks, MLP hidden width 256; vocabulary `V = 16` for the synthetic task
+      and `V = 75` for the demo text (amendment 24);
+    - `h = x + attn(LN1(x))`, `x' = h + mlp(LN2(h))`; logits `LNf(x_L)·W_head + b_head`;
+    - attention `softmax(Q·Kᵀ·(1/4) + M)·V` per head, with `Q, K, V = LN1(x)·W_q,k,v`
+      **without biases**, then the heads merged and `·W_o + b_o`; the MLP is
+      `GELU(·W_1 + b_1)·W_2 + b_2`;
+    - LayerNorm with the biased variance (divisor `d`, as PyTorch), `eps = 1e-5`,
+      a gain and a bias per block and for `LNf`;
+    - loss: the mean over all `B·T` positions of the negative log-likelihood
+      of the next character.
+    Parameters: 105,872 for `V = 16`, 113,483 for `V = 75`.
+    **Why no Q, K, V biases.** A bias on K adds the same `q·b_k` to every score in a
+    row, which softmax ignores, so that bias's gradient is exactly zero
+    mathematically and pure rounding residue numerically. Adam divides by
+    the root of the gradient's square, so it would turn residue of 1e-17 into
+    updates of about `±lr` whose sign differs between this interpreter and
+    PyTorch: the per-step comparison (amendment 23) would fail with no bug
+    present. Q and V lose theirs too, for uniformity; `W_o`, the MLP and the
+    head keep theirs.
+    **Why untied.** Amendment 23 compares every parameter's gradient. Tied,
+    the embedding's gradient would be the sum of two paths (lookup and head),
+    and a bug in either would show only in the sum. The cost is `64·V`
+    parameters.
+    **Initialisation:** `nn.Linear`'s default for every weight and bias (uniform in
+    `±1/sqrt(fan_in)`), embeddings uniform in [-1, 1], LayerNorm gains 1 and
+    biases 0, drawn from this project's seeded RNG in a fixed parameter order.
+    PyTorch regenerates them with a Python port of that RNG and refuses to run
+    unless the SHA-256 of its float64 bytes equals the one the JavaScript
+    side wrote into the spec, so the same numbers start both sides without
+    being stored.
+
+21. **Composed from existing ops; no new op.** Every piece is built from ops
+    already verified in milestones 1 to 3a:
+    - token embedding: a one-hot `[B·T, V]` input times the `[V, d]` table (exact
+      in any precision: one product by 1 and additions of exact zeros);
+    - position embedding: the `[T, d]` table broadcast-added (positions are
+      always 0 to T-1, so no lookup is needed);
+    - LayerNorm: `sum`, `sub`, `mul`, `div` and `sqrt`, two-pass (mean, then the
+      mean of squared deviations), so no `E[x²] - E[x]²` cancellation;
+    - GELU: `0.5·x·(1 + tanh(sqrt(2/π)·(x + 0.044715·x³)))`;
+    - causal mask: a constant `M` added before softmax, 0 on and below the
+      diagonal and `-1e4` above. Scores are expected to be well under 1e3 in
+      size, so `exp` of a masked entry minus its row's max underflows to exactly
+      0 in float32 and float64 alike. A masked position then contributes
+      exactly nothing, which is what makes amendment 26's causality test
+      bitwise. (The size of the largest score is recorded.)
+    - head split and merge: `reshape` and `transpose` (`[B,T,d] → [B,T,H,d_h] →
+      [B,H,T,d_h]` and back); batched `matmul` for `Q·Kᵀ` and `P·V`; projections
+      as `[B·T, d]` matmuls;
+    - softmax and log-softmax: the existing stable composites.
+    None of these is numerically unsafe in this form, so no op is added. Two
+    consequences: there is no new kernel, so the brief's "bounds bug in any new
+    kernel" has no target (amendment 27 says so rather than inventing one).
+    And no file in `src/gpu/sources.js`'s `SOURCE_FILES` or `M2_SOURCE_FILES`
+    is edited, so milestone 3a's GPU recordings stay valid against their
+    sources as they are. Milestone 3b's own files get their own source list and hash.
+
+22. **The float32 budget for this model** is amendment 8's per-element
+    propagated bound with `S = 2`, applied to the whole training step (forward,
+    loss, backward, Adam). It is computed from the float64 reference and its
+    propagated operand errors, never from GPU output. The accumulation lengths
+    that set its `γ_n` terms, at `u = 2^-24`:
+
+    | where | n | γ_n |
+    |---|---|---|
+    | attention scores `Q·Kᵀ`; backward `dP = dO·Vᵀ` | d_h = 16 | 9.5e-7 |
+    | LayerNorm sums; Q, K, V, O, MLP-up and head matmuls; their input gradients | d = 64 | 3.8e-6 |
+    | softmax sum over keys; `P·V`; backward `dQ`, `dK`, `dV` | T = 64 | 3.8e-6 |
+    | one-hot embedding (K = V); log-softmax sum over the vocabulary | V = 16 or 75 | 9.5e-7 / 4.5e-6 |
+    | MLP-down matmul; its input gradient | 256 | 1.5e-5 |
+    | every weight gradient and bias-gradient sum (over `B·T` positions) | 256 (B = 4), 512 (B = 8), 1024 (B = 16) | 1.5e-5 / 3.1e-5 / 6.1e-5 |
+
+    Safety factor `S = 2`, unchanged from amendment 8 and for the same reason.
+    What the bound looks like is predicted, not fitted: it is dominated by the
+    long weight-gradient sums, and relative to an element it is small except
+    where the element is a near-cancellation of larger terms; it is absolute, so
+    there it is large relative to the value, and that is correct.
+    **One deviation from amendment 8, stated before running.** Amendment 8
+    counts a program with any unjudgeable element (unbounded error, or a
+    reference outside float32's range) as skipped as a whole. A training step
+    here has about a million elements; one unbounded division (for example,
+    Adam's denominator for a nearly-zero second moment) would discard the
+    step. Before: the whole step skipped. After: every judgeable element is
+    judged, a step passes only if all of them pass, and the number of
+    unjudgeable elements is reported beside it. A step in which more than 1%
+    of elements are unjudgeable is reported as unjudged, not as a pass.
+
+23. **What "matches PyTorch" means.** The PyTorch side
+    (`oracle/torch_transformer.py`) is written with PyTorch's own primitives,
+    not as a translation of this project's graph: `F.embedding`, `F.layer_norm`,
+    `F.scaled_dot_product_attention(is_causal=True)` (which masks with -inf),
+    `F.gelu(approximate='tanh')`, `F.cross_entropy` and `torch.optim.Adam`.
+    - **(i) At initialisation, float64 vs float64.** Four synthetic configs
+      (seeds 1-4, batch 4) and one text config (seed 1, batch 4): the logits
+      `[B,T,V]`, the loss and every parameter's gradient, in metric v2:
+      `abs(ours - torch) <= atol + rtol·abs(torch)`,
+      `atol = τ1·max(1, max abs(torch))` per tensor, `rtol = τ1`, with
+      **`τ1 = 1e-10`**. Why: each side rounds at `u = 1.1e-16` per op. The longest
+      dependency chain from an input to a first-block gradient passes through
+      about 200 ops (2 blocks of about 40 forward ops, the loss, and the
+      backward pass back through them). A sum or matmul of length n contributes at most
+      `γ_n·Σ|terms|`, with n at most 256 here (`γ_256 ≈ 2.8e-14`). Summed along the
+      chain, that is about `6e-12` relative to the terms' absolute mass; the
+      assumption is that mass exceeds a tensor's largest entry by at most a factor of
+      10 (cancellation), giving about `6e-11`, inside `1e-10`. If that
+      assumption fails, the failure is logged, not explained away.
+    - **(ii) Training, float64 vs float64**, the same four synthetic configs, Adam,
+      **N = 20 steps**. Every step: the loss, and for every parameter tensor four
+      seeded random projections `⟨r_k, p⟩` (r uniform in [-1, 1]), checked
+      against the projected allowance `Σ_i |r_k,i|·(atol + rtol·|p_i|)`, which is
+      implied by the elementwise check, so a necessary condition of it. After
+      step N, every element of every parameter in full. Tolerance **`τ2 = 1e-8`**
+      (amendment 16's): one step's disagreement starts near 1e-13 of scale, and 20
+      steps of amplification by at most 1.5 each (`1.5^20 ≈ 3.3e3`) stay
+      inside 1e-8. Projections rather than full tensors every step, because 20
+      steps of 106k parameters for four runs would be about 70 MB of golden
+      data; a localised error persists under Adam and is caught in full at step N.
+    - **(iii) GPU float32, teacher-forced**, the same four runs, all N = 20 steps:
+      at each step the GPU is given the interpreter's float32-rounded
+      parameters, Adam state and batch from before that step, runs one step,
+      and is judged on every node by amendment 22.
+    - **(iv) GPU float32, free-running: compared statistically, not per step.**
+      Milestone 3a found (F4) that a bound carried across steps stops meaning
+      anything within a few Adam steps; nothing here pretends otherwise. 24
+      seeds, the synthetic task, batch 8, 300 Adam steps, trained on the GPU in
+      float32 and by PyTorch in float64 from the same initialisation and batches.
+      The final validation loss (the mean over all 128 validation sequences) is computed
+      for the GPU run by the float64 interpreter from its final parameters,
+      and for PyTorch by PyTorch. Over the paired differences (GPU minus
+      PyTorch): a two one-sided t-test of equivalence at `α = 0.05`, that is, the 90%
+      confidence interval of the mean difference (23 degrees of freedom) must
+      lie within **±0.02 nats per character**. For context only, PyTorch
+      float32 is compared with PyTorch float64 the same way on the same seeds.
+
+24. **Data.**
+    - **Synthetic (golden comparisons), "periodic copy":** vocabulary of 16
+      symbols; each sequence is a block of 16 symbols drawn uniformly, repeated
+      to 65 tokens (64 inputs, 64 next-token targets). 512 training and 128
+      validation sequences from seed 3101, committed and regenerated by CI.
+      The first 15 targets of a sequence are unpredictable, so the best
+      possible loss is `(15/64)·ln 16 ≈ 0.650` nats. Batches: a seeded
+      permutation of the training sequences each epoch, cut into batches
+      (milestone 3a's schedule).
+    - **Text (demo): Lewis Carroll, *Alice's Adventures in Wonderland***,
+      Project Gutenberg eBook #11, public domain in the United States.
+      Downloaded 2026-10-18 from `https://www.gutenberg.org/cache/epub/11/pg11.txt`,
+      174,311 bytes, SHA-256
+      `01b38ea4c710a84bc18d0bd41271a5a1a92b94e97b2812f4dece97d4a694725e`.
+      Committed as `data/alice/alice.txt`: the text strictly between the
+      `*** START OF THE PROJECT GUTENBERG EBOOK` line and the `*** END` line, line endings
+      changed from CRLF to LF, so no Project Gutenberg licence or trademark
+      text is included: 144,604 characters, 151,099 bytes of UTF-8, SHA-256
+      `e3917589f48b4e9f4b731a6b7e127cf9ddd6e1b3819c78be02a2702ee73bfdb1`,
+      which CI checks. 75 distinct characters,
+      in code-point order, are the vocabulary. Split: the first 90% of
+      characters are training, the rest validation. A training batch is 16
+      windows of 65 characters at seeded uniform offsets in the training part;
+      the demo's validation loss is the mean over 64 windows evenly spaced
+      across the validation part. The demo trains 600 steps.
+
+25. **Optimizer: milestone 3a's Adam graph, generalised, not rewritten.** The
+    update is the same IR construction as `src/train/step.js` (amendment 14),
+    moved into a builder that takes any parameter set. A test checks that for
+    milestone 3a's MLP the builder produces node-for-node the graph `step.js`
+    produces. Hyperparameters: lr `2e-3`, betas (0.9, 0.999), eps `1e-8`, no
+    weight decay, for every run in this milestone.
+
+26. **Property tests, stated now.**
+    - **Causality.** For each of four synthetic configs at initialisation, positions
+      `t ∈ {1, 17, 40, 63}`: the token at t is replaced by a different seeded token, and
+      the logits at every position before t must be **bitwise identical**. That is
+      exact rather than approximate because a masked score's `exp` is exactly 0
+      (amendment 21) and every other op is per position. The same test must
+      also see some logit at position t or later change, so it cannot pass
+      vacuously. Run by the interpreter (CI) and on the GPU, at initialisation
+      and on the demo's trained parameters.
+    - **Batch-order independence.** Permuting the sequences in a batch must permute the
+      logits **bitwise** (interpreter and GPU), and leave the loss and every gradient
+      equal within metric v2 at `τ1` (interpreter; the batch sums reassociate).
+    - **Greedy generation, GPU against the interpreter, K = 58 tokens.** From
+      the demo's GPU-trained parameters (float32 values, given to both sides),
+      prompt `"Alice "` (6 characters), each side generates greedily from its own
+      previous tokens until the context of 64 is full: 58 tokens. They must
+      agree on all 58. One exception, defined now: if they first disagree at a
+      position where the interpreter's top two logits are closer than the sum
+      of their float32 bounds (`S·(E_1 + E_2)`), that is recorded as a near-tie
+      and the comparison stops there; any other disagreement is a failure.
+      The demo page shows this agreement as its correctness evidence. The
+      generated text is illustrative and no claim about its quality is made.
+
+27. **Sabotage, each bug injected alone, in the model graph:**
+    - causal mask off by one: row i may see position i+1 (leaks the future);
+    - attention scale `1/sqrt(d_h)` missing;
+    - softmax over the query axis instead of the key axis;
+    - LayerNorm variance divided by `d - 1` instead of `d`;
+    - LayerNorm `eps` of `1e-3` instead of `1e-5`;
+    - head merge without its transpose (`[B,H,T,d_h]` reshaped straight to `[B,T,d]`);
+    - position embedding off by one: position p gets row `(p + 1) mod T`;
+    - a bounds bug in a new kernel: **not applicable**, since amendment 21 adds no
+      kernel. Milestones 2 and 3a's kernel sabotages still cover the existing ones.
+
+    Checks, in the order they run: causality (16 trials: 4 configs x 4
+    positions), batch order (4 configs), PyTorch at initialisation (5 configs),
+    PyTorch training (4 runs, first failing step recorded), GPU teacher-forced
+    (the first golden run, its first 2 steps). The detection rate is caught
+    trials over trials, per check. Expectations, fixed now so they can be held
+    to: every bug is caught by at least one check; **causality must catch the
+    mask bug**; causality is also predicted to catch the wrong softmax axis (a
+    column normalisation mixes in later queries) and the missing merge
+    transpose (it mixes positions), and none of the others; batch order is
+    predicted to catch none (no bug mixes sequences); PyTorch at initialisation
+    is predicted to catch all seven; GPU teacher-forced is predicted to catch
+    none, because both sides run the same wrong graph (milestone 3a's F5).
+
+28. **The demo** (`web/train-transformer.html`): trains the text model live on
+    the visitor's GPU, 600 steps, and overlays its loss on the recorded PyTorch
+    float64 and float32 curves from the same initialisation and batches. It
+    records the adapter and, on this project's local server only, the power
+    mode, and shows text generated greedily from the trained model with
+    amendment 26's agreement count beside it. It reports no timings. CI cannot run the
+    GPU: as in milestones 2 and 3a, it checks that every recording came from
+    the sources checked in, recomputes everything that needs no GPU, and
+    checks the report against the recordings.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of
