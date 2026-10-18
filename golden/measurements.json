@@ -6235,12 +6235,26 @@
    "asRun": {
     "logNodes": 564,
     "programsWithLog": 451,
-    "logOfSquarePlusC": 18
+    "logOfSquarePlusC": 18,
+    "divNodes": 438,
+    "programsWithDiv": 380,
+    "divBySquarePlusC": 10
    },
    "squareAware": {
     "logNodes": 738,
     "programsWithLog": 556,
-    "logOfSquarePlusC": 229
+    "logOfSquarePlusC": 229,
+    "divNodes": 706,
+    "programsWithDiv": 568,
+    "divBySquarePlusC": 215
+   },
+   "asRunFloat32": {
+    "logNodes": 564,
+    "programsWithLog": 451,
+    "logOfSquarePlusC": 18,
+    "divNodes": 438,
+    "programsWithDiv": 380,
+    "divBySquarePlusC": 10
    }
   }
  }

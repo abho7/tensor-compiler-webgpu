@@ -660,6 +660,23 @@ F5. **What each check can see, measured.** As amendment 18 predicted, none
     writes are dropped on this adapter (milestone 2's finding). Figures in
     `m3.training.gpu.sabotage`.
 
+F6. **F1 understated the limitation: `div` lost more coverage than `log`**
+    (2026-10-18). Before: F1 described the defect as thinning `log` alone.
+    After: generator v2 also makes a `div` denominator safe as `x*x + c` or
+    `-(x*x + c)`, which the same interval defect discards whenever `x` can be
+    negative and `c` does not cover the spurious negative lower bound. On the same
+    corpus of 2,000 programs: 438 `div` nodes in 380 programs as run, against
+    706 in 568 with `x*x` given its true interval, and an `x*x + c` denominator
+    10 times against 215. So the corpus had about 38% fewer `div` nodes and 33%
+    fewer programs containing `div` than intended, and the `x*x + c`
+    denominator at under 5% of its intended rate; `div` reached the corpus
+    mostly with denominators already bounded away from zero or through `exp`.
+    The counts are identical with the float32 guards on, which is how
+    milestone 2 drew the corpus. As with F1, nothing measured is wrong and
+    nothing is changed: every `div` that was generated was checked, and the
+    default generator stays as it was. The figures are recomputed by CI
+    (`m3.intervalLimitation`).
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of

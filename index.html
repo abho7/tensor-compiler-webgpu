@@ -250,13 +250,15 @@ try {
   no output, ${SQ.golden.zeroGradients.reachingInputs.length} reach one through an exact zero, and ${SQ.golden.zeroGradients.casesWithNoNonzeroGradient.length} case has no nonzero gradient at all.
   A gradient check says nothing about those inputs.</p>
 
-  <h3>A limitation found on the way: thinner log coverage since milestone 1.5</h3>
-  <p>Generator v2 makes a <code>log</code> argument safe as <code>x&middot;x + c</code>, but its interval analysis treats the two factors of
-  <code>x&middot;x</code> as independent, so when <code>x</code> can be negative the <code>log</code> looks unbounded and is discarded. On the
-  milestone 1.5 and 2 fuzz corpus of ${n(IL.programs)} programs: ${n(IL.asRun.logNodes)} <code>log</code> nodes in ${n(IL.asRun.programsWithLog)} programs as run,
-  against ${n(IL.squareAware.logNodes)} in ${n(IL.squareAware.programsWithLog)} had <code>x&middot;x</code> been given its true interval; the
-  <code>x&middot;x + c</code> form ${n(IL.asRun.logOfSquarePlusC)} times against ${n(IL.squareAware.logOfSquarePlusC)}. Everything generated was checked; coverage
-  was thinner than assumed. The default generator is unchanged, so those milestones' records stay byte-identical (DESIGN.md F1).</p>
+  <h3>A limitation found on the way: thinner log and div coverage since milestone 1.5</h3>
+  <p>Generator v2 makes a <code>log</code> argument and a <code>div</code> denominator safe as <code>x&middot;x + c</code>, but its interval analysis
+  treats the two factors of <code>x&middot;x</code> as independent, so when <code>x</code> can be negative the op can look unbounded and is
+  discarded. On the milestone 1.5 and 2 fuzz corpus of ${n(IL.programs)} programs: ${n(IL.asRun.logNodes)} <code>log</code> nodes in ${n(IL.asRun.programsWithLog)} programs as run,
+  against ${n(IL.squareAware.logNodes)} in ${n(IL.squareAware.programsWithLog)} had <code>x&middot;x</code> been given its true interval, with the
+  <code>x&middot;x + c</code> form ${n(IL.asRun.logOfSquarePlusC)} times against ${n(IL.squareAware.logOfSquarePlusC)}; and ${n(IL.asRun.divNodes)} <code>div</code> nodes in
+  ${n(IL.asRun.programsWithDiv)} programs against ${n(IL.squareAware.divNodes)} in ${n(IL.squareAware.programsWithDiv)}, with an <code>x&middot;x + c</code> denominator
+  ${n(IL.asRun.divBySquarePlusC)} times against ${n(IL.squareAware.divBySquarePlusC)}. Everything generated was checked; coverage was thinner than assumed.
+  The default generator is unchanged, so those milestones' records stay byte-identical (DESIGN.md F1, F6).</p>
 
   <h3>What these results rest on</h3>
   <p><b>CI does not run the GPU.</b> It checks that every recording (this milestone's run, the demo run, and a re-run of milestone 2 on

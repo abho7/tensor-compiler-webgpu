@@ -216,16 +216,18 @@ CI cannot run the GPU. It checks that every recording came from the sources chec
 recomputes everything that needs no GPU, and checks the report against the recordings. A re-run
 of milestone 2 on the extended compiler reproduced milestone 2's results exactly.
 
-## Known limitation: thinner log coverage since milestone 1.5
+## Known limitation: thinner log and div coverage since milestone 1.5
 
-Generator v2 (milestone 1.5) makes a `log` argument safe as `x*x + c`, but its interval
-analysis treats the two factors of `x*x` as independent. When `x` can be negative, `x*x`
-looks possibly negative, the `log` looks unbounded, and the op is discarded. On the
-milestone 1.5 and 2 fuzz corpus of 2,000 programs that left 564 `log` nodes in 451
-programs, against 738 in 556 had `x*x` been given its true interval, and the `x*x + c`
-form 18 times against 229. Everything generated was checked; coverage of `log` was
-thinner than assumed. The default generator is left as it was, so those milestones'
-records stay byte-identical. Details in DESIGN.md (F1); the figures are recomputed by CI.
+Generator v2 (milestone 1.5) makes a `log` argument and a `div` denominator safe as
+`x*x + c`, but its interval analysis treats the two factors of `x*x` as independent. When
+`x` can be negative, `x*x` looks possibly negative, the `log` or `div` can look unbounded,
+and the op is discarded. On the milestone 1.5 and 2 fuzz corpus of 2,000 programs that
+left 564 `log` nodes in 451 programs, against 738 in 556 had `x*x` been given its true
+interval, and the `x*x + c` form 18 times against 229; and 438 `div` nodes in 380
+programs, against 706 in 568, with an `x*x + c` denominator 10 times against 215.
+Everything generated was checked; coverage of `log` and `div` was thinner than assumed.
+The default generator is left as it was, so those milestones' records stay
+byte-identical. Details in DESIGN.md (F1, F6); the figures are recomputed by CI.
 
 ## Running it
 
@@ -241,8 +243,13 @@ Regenerating the PyTorch goldens (only needed if the cases change):
 py -3 -m venv .venv
 .venv/Scripts/python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
 node tools/export-cases.js
-.venv/Scripts/python oracle/torch_golden.py
+.venv/Scripts/python oracle/torch_golden.py golden/cases.json golden/torch.json --force
 ```
+
+Both oracle scripts take explicit input and output paths and refuse to overwrite a golden
+file without `--force` (DESIGN.md F3); milestone 3a's are
+`oracle/torch_golden.py golden/cases-m3.json golden/torch-m3.json` and
+`oracle/torch_train.py golden/train-spec-m3.json golden/torch-train-m3.json`.
 
 ## Layout
 

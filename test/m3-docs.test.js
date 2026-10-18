@@ -22,6 +22,20 @@ test('the generator limitation figures in README.md and DESIGN.md match golden/m
   assert.ok(100 * L.asRun.logOfSquarePlusC / L.squareAware.logOfSquarePlusC < 8, 'DESIGN.md says under 8%');
 });
 
+test('the div side of the generator limitation (DESIGN.md F6) matches golden/measurements.json', () => {
+  const L = m3.intervalLimitation;
+  for (const doc of [readme, design]) {
+    assert.match(doc, loose(`${L.asRun.divNodes} \`div\` nodes in ${L.asRun.programsWithDiv}`));
+    assert.match(doc, loose(`${L.squareAware.divNodes} in ${L.squareAware.programsWithDiv}`));
+    assert.match(doc, loose(`denominator ${L.asRun.divBySquarePlusC} times against ${L.squareAware.divBySquarePlusC}`));
+  }
+  assert.match(design, loose(`about ${Math.round(100 * (1 - L.asRun.divNodes / L.squareAware.divNodes))}% fewer \`div\` nodes`));
+  assert.match(design, loose(`${Math.round(100 * (1 - L.asRun.programsWithDiv / L.squareAware.programsWithDiv))}% fewer programs containing \`div\``));
+  assert.ok(100 * L.asRun.divBySquarePlusC / L.squareAware.divBySquarePlusC < 5, 'DESIGN.md says under 5%');
+  // F6 says the counts are the same with milestone 2's float32 guards on.
+  assert.deepEqual(L.asRunFloat32, L.asRun);
+});
+
 test("DESIGN.md's sqrt findings (F2) match golden/measurements.json", () => {
   const S = m3.sqrt;
   const z = S.golden.zeroGradients;
