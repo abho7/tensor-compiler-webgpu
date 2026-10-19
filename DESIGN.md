@@ -971,6 +971,30 @@ R4. **Two more bugs in my own checks, found before any recording**
       from PyTorch's step-N parameters at every step. That is not what amendment 23 says.
       Fixed before any comparison ran: it uses the parameters of the step being checked.
 
+### Milestone 3b findings
+
+F7. **What came out, against what was registered** (2026-10-19; figures in
+    `m3b` of `golden/measurements.json`). PyTorch at initialisation: 5 of 5
+    configs within `τ1`. Training: 4 of 4 runs within `τ2`. The whole-step
+    teacher-forced check: 0 of 80 steps pass and 80 are unjudged, as R3 said
+    they would be; none of its judgeable elements failed. The node-local
+    check: 80 of 80 steps. Causality and batch order held on both sides.
+    Greedy generation agreed on 58 of 58 characters. The statistical
+    comparison passed. All seven bugs were caught, and every prediction of
+    amendment 27 held, including that the GPU checks would catch none.
+
+F8. **The statistical margin was far looser than what it ended up measuring.**
+    The 90% interval of GPU minus PyTorch-float64 validation loss over 24 seeds
+    is -2.4e-7 to 1.6e-7, against a margin of ±0.02. The trajectories barely
+    diverged: in 300 Adam steps on this task, no seed's float32 and float64
+    validation losses differ by more than 2.6e-6. So the test passes, but it says only that the
+    difference is under 0.02 nats; it could not have told apart anything finer.
+    One thing the data do show, not predicted: the GPU's float32 differs from
+    float64 more than PyTorch's own CPU float32 does. Over the seeds, the spread of
+    the differences is about 22 times larger; on the demo, the largest per-step loss
+    difference is about 11 times larger. Both are inside every tolerance. Which kernels
+    contribute (naive summation order, or WGSL's looser per-op accuracy) was not isolated.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of

@@ -25,7 +25,7 @@ So the first milestone is the reference that everything after it is checked agai
 | 1.5 | hardening: comparison metric v2, generator v2, per-bug detection rates | **done** |
 | 2 | every op lowered to WGSL and checked on a real GPU under a float32 budget; correctness only | **done** |
 | 3a | train an MLP on the GPU, checked against PyTorch and the float64 interpreter as pre-registered | **done** |
-| 3b | train a small character-level transformer on the GPU, checked as pre-registered (DESIGN.md amendments 20 to 28) | in progress |
+| 3b | train a small character-level transformer on the GPU, checked as pre-registered (DESIGN.md amendments 20 to 28) | **done** |
 | 4 | fusion and autotuning, timed against llm-inference-webgpu's hand-written kernels | not started |
 
 ## Design
@@ -216,6 +216,45 @@ CI cannot run the GPU. It checks that every recording came from the sources chec
 recomputes everything that needs no GPU, and checks the report against the recordings. A re-run
 of milestone 2 on the extended compiler reproduced milestone 2's results exactly.
 
+## Milestone 3b: a character-level transformer on the GPU
+
+A decoder-only, pre-LayerNorm transformer (2 blocks, width 64, 4 heads, context 64, GELU, learned
+positions, untied head; 105,872 parameters on the synthetic task, 113,483 on the demo text) trained
+with Adam. A training step is one IR graph, composed only from ops verified in earlier milestones:
+no op or kernel was added, and none of milestone 3a's hashed sources was edited. Everything was
+pre-registered in DESIGN.md (amendments 20 to 28) before it ran. Nothing is timed. Results (Intel
+gen-12lp, Chrome, power mode recorded with them):
+
+- **Interpreter against PyTorch float64 at initialisation:** logits, loss and every parameter's
+  gradient, 5 of 5 configs within 1e-10; PyTorch written with its own primitives
+  (`scaled_dot_product_attention`, `layer_norm`, `gelu`).
+- **Interpreter against PyTorch while training:** 4 of 4 runs, 20 steps each, within 1e-8.
+- **GPU teacher-forced, as registered: it could not judge anything that matters.** The composed
+  float32 bound that served milestones 2 and 3a is infinite for 64% of a step's elements, so all
+  80 of 80 steps are unjudged (none failed on the elements it could judge). The pre-registration
+  predicted otherwise; this is revision R3 in DESIGN.md, not a pass.
+- **GPU teacher-forced, node-local (added by R3 before it ran):** every kernel launch given
+  float32-rounded reference operands and judged at its own budget: 80 of 80 steps pass. It sees
+  every kernel on the real step; it cannot see error accumulating across ops.
+- **Causality and batch order:** bitwise, 16 of 16 and 4 of 4 on the interpreter and on the GPU;
+  causality also holds on the trained demo model.
+- **Greedy generation:** 58 of 58 characters agree between the GPU and the interpreter.
+- **After the trajectories diverge:** 24 seeds, final validation loss equivalent to PyTorch's
+  within the pre-registered ±0.02 nats. The margin was loose for this task: the 90% interval of
+  the difference is -2.4e-7 to 1.6e-7, and the GPU's spread is about 22 times PyTorch-float32's.
+- **Injected bugs:** all 7 caught. Causality caught the mask bug, as required, and also the wrong
+  softmax axis and the missing merge transpose; PyTorch at initialisation caught all 7; the GPU
+  checks caught none, since both sides run the same wrong graph. Every prediction held.
+- **Bugs in my own checks:** the harness first counted unjudged steps as detections, and the demo's
+  greedy path passed a sequence where a batch was expected (DESIGN.md R3, R4). Both were fixed
+  before any recording.
+- **Demo:** [`web/train-transformer.html`](https://abho7.github.io/tensor-compiler-webgpu/web/train-transformer.html)
+  trains on *Alice's Adventures in Wonderland* (Project Gutenberg, public domain, checksummed)
+  and overlays PyTorch's curves. The text it generates is illustrative only.
+
+CI cannot run the GPU. It checks that both recordings came from the sources checked in,
+recomputes everything that needs no GPU, and checks the report against the recordings.
+
 ## Known limitation: thinner log and div coverage since milestone 1.5
 
 Generator v2 (milestone 1.5) makes a `log` argument and a `div` denominator safe as
@@ -263,6 +302,10 @@ oracle/         torch_golden.py (offline only)
 golden/         cases.json, torch.json, measurements.json
 tools/          export-cases.js, measure.js, snapshot-wgsl.js, serve.js
 web/gpu.html    the GPU harness
+src/m3b/        milestone 3b: the transformer, its data, Adam builder, CPU checks, measurement
+oracle/torch_transformer.py  milestone 3b's PyTorch oracle (offline only)
+web/m3b.html, web/train-transformer.html  milestone 3b's GPU harness and demo
+data/alice/     the demo text (Project Gutenberg #11, body only)
 test/           node --test
 ```
 
