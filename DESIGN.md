@@ -912,6 +912,52 @@ only by dated revisions with before and after.
     the sources checked in, recomputes everything that needs no GPU, and
     checks the report against the recordings.
 
+### Milestone 3b revisions, forced by results
+
+R3. **The composed float32 bound is vacuous inside one transformer step**
+    (2026-10-18, first GPU runs, before any recording). Amendment 22 judged a
+    teacher-forced step by amendment 8's bound propagated through the whole
+    step. Measured on golden run 1, step 0: 9,488,470 of 14,844,201 elements
+    (63.9%) have an infinite bound, the first at node 153 of 1,641 (block 1's
+    first LayerNorm division). Even the forward pass alone, at
+    initialisation, has a finite bound on 0 of its 1,024 logits (V = 16) and 0 of
+    4,800 (V = 75). The mechanism: the bound is a first-order worst case, and
+    each matmul multiplies an incoming bound by the L1 norm of a weight column
+    (about 4 for 64 inputs at this initialisation, 8 for the 256-wide MLP-down),
+    where real errors partly cancel. On top of that, the row max in softmax inherits the bound of
+    the masked entries (the rounding of `score - 1e4`, about 6e-4). The largest
+    absolute bound goes from 1.1e-6 after the embedding to 5.9e-3 after block
+    0's attention, 0.95 after its MLP, and infinity in block 1's first
+    LayerNorm, against values of order 1. Amendment 22's prediction ("small
+    except near cancellation") was wrong.
+    Consequences, decided before any further GPU run:
+    - **Check (iii) is kept exactly as registered and recorded as it comes
+      out.** By its own 1% rule every step is unjudged, which is not a pass.
+      The elements it can judge are still judged and reported.
+    - **Accounting bug found in my harness.** The first GPU sabotage run
+      counted an unjudged step as a detection, so all seven bugs looked
+      "caught" by the GPU check. An unjudged step detects nothing. After:
+      a detection needs a judged element over its bound.
+    - **Added: (iii-b), node-local teacher-forcing.** Before: none. After: at
+      every step of the four golden runs, every kernel launch of the real step
+      is given the float32-rounded reference values of its own operands, not
+      the GPU's, and its output is judged against the float64 result on those
+      operands by amendment 8's bound for that single op (operand errors zero,
+      so the bound is the per-op budget of the direct tests), `S = 2`.
+      Unjudgeable elements are counted, and the 1% rule applies as in amendment 22. A step
+      passes if every judgeable element of every node passes. What it can see: every
+      kernel, on this model's real shapes and data, at its own budget. What it cannot
+      see: how error accumulates from op to op. That is left to the statistical
+      comparison (iv), plus an observed per-step difference between the GPU's and
+      the interpreter's loss and updated parameters, reported for information
+      with no tolerance attached.
+    - **Greedy generation: the near-tie exception is removed.** Before: a
+      first disagreement where the top two logits differ by less than
+      `S·(E_1 + E_2)` was a near-tie, not a failure. After: those bounds are
+      infinite at every logit, so the exception would excuse any disagreement.
+      A disagreement is reported as a failure, with the gap between the
+      interpreter's top two logits beside it. Decided before any greedy run.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of
