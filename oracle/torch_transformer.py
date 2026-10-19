@@ -270,7 +270,7 @@ def main():
 
     out["blob"] = {"file": out_bin.name, "index": blob.index, "count": blob.offset}
     out_bin.write_bytes(b"".join(blob.parts))
-    out_json.write_text(json.dumps(out) + "\n", encoding="utf-8")
+    out_json.write_text(json.dumps(out) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {out_json.name} and {out_bin.name} ({blob.offset} float64 values) with torch {torch.__version__}")
 
 
