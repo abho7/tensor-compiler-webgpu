@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M3b GPU checks</title>
+<style>
+  :root { --ink: #16171b; --dim: #5c6068; --bg: #fbfbfc; --good: #15803d; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e7e9ee; --dim: #9aa1ab; --bg: #131418; --good: #4ade80; --bad: #f87171; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 ui-monospace, Consolas, monospace; }
+  main { max-width: 56rem; margin: 0 auto; padding: 2rem 1rem; }
+  .dim { color: var(--dim); } .good { color: var(--good); } .bad { color: var(--bad); }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <h1>Milestone 3b GPU checks</h1>
+  <p class="dim">The character transformer's training step on the GPU against the float64 interpreter:
+  teacher-forced every step of the four golden runs, causality and batch order on the GPU, the trainer path
+  against the checked path, 24 seeds trained on the GPU for the equivalence test, and each injected model bug.
+  Pre-registered in DESIGN.md amendments 20 to 28. Nothing is timed. <code>?record=0</code> skips saving;
+  <code>?parts=selftest,tf,props,consistency,stat,sabotage</code> runs a subset (a subset is never recorded).</p>
+  <p id="status">starting&hellip;</p>
+  <pre id="out"></pre>
+</main>
+<script type="module">
+import { GpuRunner } from '../src/gpu/runtime.js';
+import { runTeacherForced3b, runPropertiesGpu, runConsistency3b, runStatistical3b, runSabotage3b, runSelfTest3b } from '../src/gpu/harness-m3b.js';
+import { hashSources } from '../src/gpu/sources.js';
+import { M3B_SOURCE_FILES } from '../src/gpu/sources-m3b.js';
+
+const ALL = ['selftest', 'tf', 'props', 'consistency', 'stat', 'sabotage'];
+const q = new URLSearchParams(location.search);
+const parts = q.get('parts') ? q.get('parts').split(',') : ALL;
+const status = document.getElementById('status');
+const out = document.getElementById('out');
+const progress = (s) => { status.textContent = s; window.__progress = s; };
+const log = (s) => { out.textContent += s + '\n'; };
+
+try {
+  const texts = await Promise.all(M3B_SOURCE_FILES.map((f) => fetch(`../${f}`, { cache: 'no-store' }).then((r) => {
+    if (!r.ok) throw new Error(`cannot read ${f}`);
+    return r.text();
+  })));
+  const sourceHash = hashSources(texts);
+  const spec = await (await fetch('../golden/spec-m3b.json', { cache: 'no-store' })).json();
+  const runner = await GpuRunner.create();
+  const adapter = runner.info();
+  log(`adapter: ${adapter.vendor} ${adapter.architecture} ${adapter.description}`);
+  log(`sources: ${sourceHash}; parts: ${parts.join(',')}`);
+  const result = { milestone: '3b', sourceHash, adapter };
+
+  if (parts.includes('selftest')) {
+    result.selfTest = await runSelfTest3b(runner, spec, { progress });
+    for (const s of result.selfTest) log(`self-test [${s.name}]: whole-step judged failure ${!!s.whole?.first}, node-local ${s.local?.first ? `caught at ${s.local.first.op} (ratio ${s.local.first.ratio})` : `not caught (worst ${s.local?.worst})`}${s.error ? ` error ${s.error}` : ''}`);
+  }
+  if (parts.includes('tf')) {
+    result.teacherForced = await runTeacherForced3b(runner, spec, { progress });
+    for (const r of result.teacherForced) {
+      log(`teacher-forced ${r.name} (${r.steps} steps, ${r.errors} errors)`);
+      log(`  whole step (registered): ${r.whole.passed} pass, ${r.whole.unjudged} unjudged, ${r.whole.judgedFailures} with a judged failure, worst judged ${r.whole.worst}, unjudgeable ${r.whole.unjudgeable}/${r.whole.elements}`);
+      log(`  node-local (R3):         ${r.local.passed} pass, ${r.local.unjudged} unjudged, ${r.local.judgedFailures} with a judged failure, worst ${r.local.worst}, unjudgeable ${r.local.unjudgeable}/${r.local.elements}`);
+      log(`  observed: max loss diff ${r.observed.maxLossDiff}, max param rel diff ${r.observed.maxParamRel}`);
+    }
+  }
+  if (parts.includes('props')) {
+    result.properties = await runPropertiesGpu(runner, spec, { progress });
+    const c = result.properties.causality, b = result.properties.batchOrder;
+    log(`GPU causality: ${c.filter((x) => x.pass).length}/${c.length}; batch order: ${b.filter((x) => x.logitsPermuted).length}/${b.length}`);
+  }
+  if (parts.includes('consistency')) {
+    result.consistency = await runConsistency3b(runner, spec);
+    log(`trainer vs checked path: ${result.consistency.identical ? 'identical' : 'DIFFERENT'} over ${result.consistency.steps} steps`);
+  }
+  if (parts.includes('stat')) {
+    result.statistical = await runStatistical3b(runner, spec, { progress });
+    log(`statistical: ${result.statistical.length} runs`);
+  }
+  if (parts.includes('sabotage')) {
+    result.sabotage = await runSabotage3b(runner, spec, { progress });
+    for (const s of result.sabotage) log(`sabotage ${s.name}: whole-step caught ${s.caughtWhole}/${s.trials}, node-local caught ${s.caughtLocal}/${s.trials}, errors ${s.errors}`);
+  }
+
+  if (runner.lost) throw new Error(`device lost during the run: ${runner.lost.message}`);
+  window.__result = result;
+  if (q.get('record') !== '0' && ALL.every((p) => parts.includes(p))) {
+    const saved = await (await fetch('/record/gpu-m3b.json', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) })).json();
+    log(`recorded: ${saved.saved}, power mode: ${saved.power?.activeMode} (on AC: ${saved.power?.onAC})`);
+  }
+  progress('done');
+  status.className = 'good';
+} catch (error) {
+  window.__error = String(error.stack ?? error);
+  status.textContent = `error: ${error.message ?? error}`;
+  status.className = 'bad';
+}
+window.__done = true;
+</script>

@@ -7,9 +7,11 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { measureAll } from '../src/testing/measure-all.js';
+import { m3bInputs } from '../src/m3b/inputs.js';
+import { measureM3b } from '../src/m3b/measure-m3b.js';
 
 const read = (p) => JSON.parse(readFileSync(new URL(p, import.meta.url)));
-const result = measureAll({ cases: read('../golden/cases.json').cases, golden: read('../golden/torch.json'),
+const result = { ...measureAll({ cases: read('../golden/cases.json').cases, golden: read('../golden/torch.json'),
   gpu: { record: read('../golden/gpu-m2.json'), run1: read('../golden/gpu-m2-run1-direct.json'), oob: read('../golden/gpu-oob.json') },
   m3: {
     sqrtCases: read('../golden/cases-m3.json').cases, sqrtGolden: read('../golden/torch-m3.json'),
@@ -19,7 +21,7 @@ const result = measureAll({ cases: read('../golden/cases.json').cases, golden: r
       optdigitsTrain: readFileSync(new URL('../data/optdigits/optdigits.tra', import.meta.url), 'utf8'),
       optdigitsTest: readFileSync(new URL('../data/optdigits/optdigits.tes', import.meta.url), 'utf8'),
     },
-  } });
+  } }), ...(await measureM3b(m3bInputs(new URL('../', import.meta.url)))) };
 writeFileSync(new URL('../golden/measurements.json', import.meta.url), JSON.stringify(result, null, 1) + '\n');
 const { m1, m1_5: m } = result;
 console.log(`M1: fuzz ${m1.fuzz.agree}/${m1.fuzz.programs}; torch ${m1.torch.pass}/${m1.torch.cases}`);

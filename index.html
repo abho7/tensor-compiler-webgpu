@@ -97,7 +97,7 @@ const n = (v) => Number(v).toLocaleString('en-US');
 const pct = (a, b) => `${(100 * a / b).toFixed(1)}%`;
 
 try {
-  const { m1, m1_5: H, m2: G, m2_followup: FU, m3: M3 } = await (await fetch('golden/measurements.json')).json();
+  const { m1, m1_5: H, m2: G, m2_followup: FU, m3: M3, m3b: M3B } = await (await fetch('golden/measurements.json')).json();
   const f = m1.fuzz, c = m1.fuzzCentral, s = m1.secondOrder, t = m1.torch, B = m1.budgets;
   const rules = m1.sabotage.rules;
   const allCaught = rules.every((r) => r.caughtAfter !== null);
@@ -158,7 +158,131 @@ try {
       ${series.map((x) => `<polyline fill="none" stroke="${x.color}" stroke-width="2" points="${x.values.map((v, t) => `${xp(t).toFixed(1)},${yp(v).toFixed(1)}`).join(' ')}"/>`).join('')}</svg>`;
   };
 
+  // Milestone 3b: every figure from measurements.json's m3b section.
+  const m3bSection = (X) => {
+    const C = X.cpu, V = X.vacuity, GP = X.gpu, mdl = X.model;
+    const ok = (b) => (b ? 'good' : 'bad');
+    const all = (xs) => xs.every((x) => x.pass);
+    const bugName3 = { 'mask-off-by-one': 'causal mask off by one (sees position i + 1)', 'scale-missing': 'attention scale missing',
+      'softmax-wrong-axis': 'softmax over the query axis', 'ln-divisor': 'LayerNorm variance divided by d &minus; 1',
+      'ln-eps': 'LayerNorm eps too large', 'merge-no-transpose': 'head merge without its transpose', 'position-off-by-one': 'position embedding off by one' };
+    const checkName3 = { causality: 'causality', batchOrder: 'batch order', torchInit: 'PyTorch, at init', torchTraining: 'PyTorch, training',
+      gpuWholeStep: 'GPU, whole step', gpuNodeLocal: 'GPU, node-local' };
+    const worstOf = (xs, k) => Math.max(...xs.map((x) => x[k]));
+    const causalCpu = C.properties.causality, orderCpu = C.properties.batchOrder;
+    if (!GP) return `<h2>Milestone 3b: a character transformer on the GPU</h2><p>No GPU recording yet.</p>`;
+    const tf = GP.teacherForced, st = GP.statistical, dm = GP.demo;
+    return `
+  <h2>Milestone 3b: a character transformer trained on the GPU, correctness pre-registered</h2>
+  <p>A decoder-only, pre-LayerNorm transformer: ${mdl.L} blocks, width ${mdl.d}, ${mdl.H} heads of ${mdl.dh}, context ${mdl.T}, MLP width ${mdl.ff},
+  GELU in its tanh form, learned position embeddings, an untied head; ${n(mdl.params.synthetic)} parameters on the synthetic task,
+  ${n(mdl.params.text)} on the demo text. Every piece is composed from ops verified in earlier milestones: no op was added, so no
+  kernel was either. A training step (forward, loss, backward, Adam) is one IR graph. Everything below was pre-registered in DESIGN.md
+  (its milestone 3b preconditions) before any of it ran, and one revision (R3) was forced by the first GPU run.</p>
+  <div class="wrap"><table class="claims">
+    <tr><th>claim</th><th>measured</th><th>checked against</th></tr>
+    <tr><td>The interpreter matches PyTorch at initialisation: logits, loss and every parameter's gradient</td>
+      <td class="n ${ok(all(C.init))}">${C.init.filter((x) => x.pass).length} of ${C.init.length} configs</td>
+      <td>PyTorch float64 written with its own primitives (scaled_dot_product_attention, layer_norm, gelu); metric v2 at ${sci(C.tau1)};
+        worst ${sci(worstOf(C.init, 'worst'))} of the allowance</td></tr>
+    <tr><td>The interpreter matches PyTorch while training</td>
+      <td class="n ${ok(all(C.training))}">${C.training.filter((x) => x.pass).length} of ${C.training.length} runs, ${C.training[0].steps} steps each</td>
+      <td>loss and seeded projections of every parameter each step, every element after the last; metric v2 at ${sci(C.tau2)}; worst
+        ${sci(Math.max(worstOf(C.training, 'worstLoss'), worstOf(C.training, 'worstProjection'), worstOf(C.training, 'finalWorst')))} of the allowance</td></tr>
+    <tr><td>GPU, teacher-forced, whole step judged by the composed float32 bound <b>(as registered)</b></td>
+      <td class="n ${tf.whole.passed === tf.steps ? 'good' : 'bad'}">${tf.whole.passed} of ${tf.steps} steps pass; ${tf.whole.unjudged} unjudged</td>
+      <td>the bound is infinite for ${pct(tf.whole.unjudgeable, tf.whole.elements)} of all elements (revision R3, below). Of the elements it can judge,
+        ${tf.whole.judgedFailures ? `<b class="bad">${tf.whole.judgedFailures} steps had a failure</b>` : 'none failed'}; worst ${sci(tf.whole.worstJudged)} of the budget</td></tr>
+    <tr><td>GPU, teacher-forced, every kernel launch judged at its own budget (R3)</td>
+      <td class="n ${ok(tf.local.passed === tf.steps)}">${tf.local.passed} of ${tf.steps} steps</td>
+      <td>each launch given float32-rounded reference operands; ${n(tf.local.elements)} elements judged, ${n(tf.local.unjudgeable)} unjudgeable;
+        worst ${sci(tf.local.worst)} of the budget</td></tr>
+    <tr><td>Causality: changing token t leaves every logit before t bitwise unchanged</td>
+      <td class="n ${ok(causalCpu.every((x) => x.pass) && GP.properties.causality.passed === GP.properties.causality.trials && dm.causalityGpu.passed === dm.causalityGpu.trials)}">
+        ${causalCpu.filter((x) => x.pass).length} of ${causalCpu.length} interpreter, ${GP.properties.causality.passed} of ${GP.properties.causality.trials} GPU</td>
+      <td>at initialisation; on the demo's trained weights ${dm.causalityGpu.passed} of ${dm.causalityGpu.trials} on the GPU and ${dm.causalityCpu.passed} of ${dm.causalityCpu.trials} on the interpreter</td></tr>
+    <tr><td>Batch order: reversing a batch reverses the logits bitwise</td>
+      <td class="n ${ok(orderCpu.every((x) => x.pass) && GP.properties.batchOrder.passed === GP.properties.batchOrder.trials)}">
+        ${orderCpu.filter((x) => x.pass).length} of ${orderCpu.length} interpreter, ${GP.properties.batchOrder.passed} of ${GP.properties.batchOrder.trials} GPU</td>
+      <td>on the interpreter the loss and every gradient also agree within ${sci(C.tau1)}</td></tr>
+    <tr><td>Greedy generation: the GPU and the interpreter write the same characters</td>
+      <td class="n ${ok(dm.greedy.agree === dm.greedy.k)}">${dm.greedy.agree} of ${dm.greedy.k}</td>
+      <td>from the demo's GPU-trained weights, each side continuing from its own output</td></tr>
+    <tr><td>After the trajectories diverge, final validation loss is equivalent to PyTorch's</td>
+      <td class="n ${ok(st.gpuVsTorch64.pass)}">${st.gpuVsTorch64.pass ? 'equivalent' : 'not shown'}</td>
+      <td>${st.seeds} seeds; two one-sided t-tests, &alpha; = ${st.alpha}, margin &plusmn;${st.margin} nats per character</td></tr>
+    <tr><td>Every injected bug is caught; the causality test catches the mask bug</td>
+      <td class="n ${ok(GP.sabotage.bugs.every((b) => b.caughtFirstBy) && GP.sabotage.bugs.find((b) => b.name === 'mask-off-by-one').checks.causality.caught > 0)}">
+        ${GP.sabotage.bugs.filter((b) => b.caughtFirstBy).length} of ${GP.sabotage.bugs.length}</td>
+      <td>every prediction made in advance held: ${GP.sabotage.bugs.every((b) => Object.values(b.asPredicted).every(Boolean)) ? 'yes' : '<b class="bad">no</b>'}</td></tr>
+  </table></div>
+  <p class="note">Recorded on ${esc(GP.adapter.vendor)} ${esc(GP.adapter.architecture)} at ${esc(GP.recorded.at)}; power mode
+  <b>${esc(GP.recorded.power.activeMode)}</b>, ${GP.recorded.power.onAC ? 'on AC' : 'on battery'}. Nothing is timed. The trainer that keeps
+  parameters on the GPU computed ${GP.consistency.identical ? 'exactly, bit for bit,' : '<b>NOT</b>'} what the checked path computed over its first ${GP.consistency.steps} steps.</p>
+
+  <h3>Revision R3: the float32 budget does not survive two transformer blocks</h3>
+  <p>The registered teacher-forced check judged a whole step by the first-order error bound propagated through it, the method that served
+  milestones 2 and 3a. On this model it is vacuous: on golden run 1's first step, ${n(V.unjudgeable)} of ${n(V.elements)} elements
+  (${pct(V.unjudgeable, V.elements)}) have an infinite bound, the first at node ${V.firstUnbounded.node} of ${n(V.nodes)}, a LayerNorm division in the second
+  block. Even the forward pass at initialisation has a finite bound on ${V.logits[0].finite} of its ${n(V.logits[0].logits)} logits. Along the first block's
+  residual stream the largest bound grows from ${sci(V.streamMaxBound.embedding)} after the embedding to ${sci(V.streamMaxBound.afterAttention0)} after attention and
+  ${sci(V.streamMaxBound.afterMlp0)} after the MLP, against values of order one: each matmul multiplies a worst-case bound by a weight column's L1 norm,
+  where real rounding errors partly cancel. The pre-registration predicted the bound would stay small; it did not. The registered check is
+  kept and reported as it came out, unjudged, never as a pass. Added, with its rule fixed before it ran: each kernel launch of the real step
+  given the float32-rounded reference values of its own operands and judged at that op's own budget. That sees every kernel on this model's
+  real shapes and data; it cannot see how error accumulates across ops, which is left to the statistical comparison. The same revision
+  removed the greedy test's near-tie exception, which infinite bounds would have turned into an excuse for any disagreement.</p>
+  <p class="note">The node-local check was tested by breaking kernels: ${GP.selfTest.filter((s) => s.localCaught).map((s) => `<code>${esc(s.name)}</code> (caught at ${esc(s.localFirstOp)})`).join(', ')}
+  ${GP.selfTest.filter((s) => !s.localCaught).length ? `were caught; ${GP.selfTest.filter((s) => !s.localCaught).map((s) => `<code>${esc(s.name)}</code>`).join(', ')}, a reordering that milestone 2 showed stays inside the budget, was not (worst ${sci(Math.max(...GP.selfTest.filter((s) => !s.localCaught).map((s) => s.localWorst)))})` : 'were all caught'}.
+  The observed differences between the GPU's step and the interpreter's, for information only: loss at most ${sci(tf.observed.maxLossDiff)}, updated parameters at most
+  ${sci(tf.observed.maxParamRel)} of each tensor's largest entry.</p>
+
+  <h3>Injected bugs, against every check</h3>
+  <div class="wrap"><table>
+    <tr><th>bug</th>${GP.sabotage.checkOrder.map((c) => `<th>${checkName3[c]}</th>`).join('')}<th>caught first by</th></tr>
+    ${GP.sabotage.bugs.map((b) => `<tr><td>${bugName3[b.name] ?? esc(b.name)}</td>${GP.sabotage.checkOrder.map((c) => {
+      const x = b.checks[c];
+      return `<td class="n ${x.caught ? '' : 'note'}">${x.caught} / ${x.trials}</td>`;
+    }).join('')}<td>${b.caughtFirstBy ? checkName3[b.caughtFirstBy] : '<span class="bad">nothing</span>'}</td></tr>`).join('')}
+  </table></div>
+  <p>Predicted before anything ran: causality would catch the mask bug, the wrong softmax axis and the missing merge transpose (all three mix
+  positions) and nothing else; batch order nothing (no bug mixes sequences); PyTorch at initialisation all of them; the GPU checks none,
+  because both sides run the same wrong graph. ${(() => {
+    const missed = GP.sabotage.bugs.flatMap((b) => Object.entries(b.asPredicted).filter(([, v]) => !v).map(([k]) => `${bugName3[b.name]} (${checkName3[k] ?? k})`));
+    return missed.length ? `<b class="bad">Not as predicted:</b> ${missed.join('; ')}.` : 'Every one of those predictions held.';
+  })()} A bounds bug in a new kernel had no target, since no kernel was added.</p>
+
+  <h3>Equivalence after the trajectories diverge</h3>
+  <div class="wrap"><table>
+    <tr><th>comparison</th><th>mean difference</th><th>${Math.round(100 * (1 - 2 * st.alpha))}% interval</th><th>margin</th><th>range over seeds</th><th></th></tr>
+    ${[['GPU float32 &minus; PyTorch float64', st.gpuVsTorch64], ['PyTorch float32 &minus; PyTorch float64 (context)', st.torch32VsTorch64]].map(([k, x]) => `<tr><td>${k}</td>
+      <td class="n">${sci(x.mean)}</td><td class="n">${sci(x.lower)} to ${sci(x.upper)}</td><td class="n">&plusmn;${x.margin}</td>
+      <td class="n">${sci(x.min)} to ${sci(x.max)}</td><td class="${x.pass ? 'good' : 'bad'}">${x.pass ? 'equivalent' : 'not shown'}</td></tr>`).join('')}
+  </table></div>
+  <p class="note">${st.seeds} seeds on the periodic-copy task, each trained from the same start on the same batches; the GPU run's validation loss
+  computed by the float64 interpreter from its final weights. Mean validation loss: GPU ${st.meanValLoss.gpu.toFixed(4)}, PyTorch float64
+  ${st.meanValLoss.torch64.toFixed(4)}, float32 ${st.meanValLoss.torch32.toFixed(4)}; the task's floor is ${st.floor.toFixed(4)}.</p>
+
+  <h3>The demo: Alice, trained live on your GPU</h3>
+  ${curve([{ values: dm.torchLosses64, color: 'var(--faint)' }, { values: dm.losses, color: 'var(--accent)' }], dm.steps)}
+  <p>${n(dm.steps)} steps on <i>Alice's Adventures in Wonderland</i>. Grey: PyTorch float64; blue: this compiler's kernels in float32 on
+  ${esc(dm.adapter.vendor)} ${esc(dm.adapter.architecture)} (power mode ${esc(dm.recorded.power.activeMode)}). Validation loss ${dm.valLoss.toFixed(4)}
+  against PyTorch's ${dm.torchValLoss64.toFixed(4)} (float64) and ${dm.torchValLoss32.toFixed(4)} (float32); the largest per-step loss difference from
+  float64 was ${sci(dm.maxLossDifferenceFromTorch64)}, against ${sci(dm.torch32VsTorch64MaxLossDiff)} between PyTorch's own float32 and float64 runs.
+  No tolerance was registered for the demo; these are information. The evidence is the greedy agreement: ${dm.greedy.agree} of ${dm.greedy.k}
+  characters the same on the GPU and the interpreter. The sample itself is illustrative and no claim about its quality is made:</p>
+  <p class="note" style="white-space:pre-wrap">${esc(dm.generated)}</p>
+  <p><a href="web/train-transformer.html">Run it yourself.</a></p>
+
+  <h3>What these results rest on</h3>
+  <p><b>CI does not run the GPU.</b> It checks that both recordings came from the sources checked in, recomputes everything that needs no
+  GPU (the PyTorch comparisons, both properties on the interpreter, every bug against them, and revision R3's measurement), and checks every
+  figure here against the recordings. Milestone 3a's sources were not edited, so its recordings still stand.</p>`;
+  };
+
   let html = `
+  ${M3B ? m3bSection(M3B) : ''}
+
   <h2>Milestone 3a: an MLP trained on the GPU, correctness pre-registered</h2>
   <p>A training step is one graph in the IR: an MLP's forward pass, softmax cross-entropy, autodiff's backward pass, and
   SGD with momentum or Adam built from IR ops, compiled to WGSL kernels and run on the GPU with the parameters kept there.

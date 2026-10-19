@@ -958,6 +958,19 @@ R3. **The composed float32 bound is vacuous inside one transformer step**
       A disagreement is reported as a failure, with the gap between the
       interpreter's top two logits beside it. Decided before any greedy run.
 
+R4. **Two more bugs in my own checks, found before any recording**
+    (2026-10-18). Neither changed a rule; both are recorded because the
+    checks are what this milestone claims.
+    - The demo page's greedy generation handed the GPU path a single sequence where
+      it expected a batch, so the 65 tokens became a "batch" of 65. The run
+      needed a 335 MB read-back buffer, WebGPU refused it, and the error vanished,
+      because the page's click handler sat outside its error handling. The page
+      showed "generating…" forever. Fixed: the call is wrapped, and the handler reports
+      any error. Found on the first unrecorded run.
+    - My first draft of the projection allowance (amendment 23 (ii)) took the size reference
+      from PyTorch's step-N parameters at every step. That is not what amendment 23 says.
+      Fixed before any comparison ran: it uses the parameters of the step being checked.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of

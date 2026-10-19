@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transformer on your GPU</title>
+<meta name="description" content="A small character-level transformer trained live on Alice's Adventures in Wonderland by WGSL kernels this project's compiler generated, overlaid on PyTorch's runs from the same start.">
+<style>
+  :root { --ink: #16171b; --dim: #5c6068; --faint: #8b9099; --line: #e3e5e9; --bg: #fbfbfc; --card: #ffffff;
+          --accent: #3b5bdb; --ref: #9aa1ab; --ref2: #c2853a; --good: #15803d; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --ink: #e7e9ee; --dim: #9aa1ab; --faint: #767c86; --line: #2a2d34; --bg: #131418;
+          --card: #191b20; --accent: #91a7ff; --ref: #5c6068; --ref2: #d29a52; --good: #4ade80; --bad: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  main { max-width: 52rem; margin: 0 auto; padding: 3rem 1rem 5rem; }
+  h1 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 .5rem; }
+  h2 { font-size: 1.05rem; margin: 1.6rem 0 .4rem; }
+  p { max-width: 46rem; } .dim { color: var(--dim); } .note { color: var(--dim); font-size: .86rem; }
+  a { color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; margin: 1rem 0; }
+  button { font: inherit; padding: .55rem 1rem; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: var(--bg); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  svg { width: 100%; height: auto; display: block; }
+  .axis { stroke: var(--line); } .lbl { fill: var(--faint); font-size: 11px; }
+  .ref { fill: none; stroke: var(--ref); stroke-width: 2; } .ref2 { fill: none; stroke: var(--ref2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+  .gpu { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .key span { display: inline-flex; align-items: center; gap: .4rem; margin-right: 1.2rem; font-size: .85rem; color: var(--dim); }
+  .key i { width: 18px; height: 3px; display: inline-block; }
+  table { border-collapse: collapse; font-size: .9rem; } td { padding: .2rem 1.2rem .2rem 0; vertical-align: top; } td.n { text-align: right; }
+  .good { color: var(--good); } .bad { color: var(--bad); }
+  .sample { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid var(--line); padding-left: .8rem; }
+  .sample b { color: var(--dim); font-weight: normal; }
+</style>
+<main>
+  <h1>Train a character transformer on your GPU</h1>
+  <p class="dim">A two-block, 113k-parameter decoder-only transformer (context 64, width 64, four heads) learning
+  <i>Alice's Adventures in Wonderland</i> one character at a time, with Adam. Every step &mdash; embedding, causal
+  attention, LayerNorm, GELU, loss, backward pass and update &mdash; is one graph in this project's IR, compiled to WGSL
+  kernels by its own compiler and run in your browser, with no ML framework. The grey curve is PyTorch's run from the
+  same initial weights on the same batches in float64, the dashed one PyTorch in float32; yours is float32 on your GPU.
+  <a href="../">The report</a> says what was checked and how.</p>
+  <div class="card">
+    <button id="go" disabled>Loading&hellip;</button>
+    <span id="status" class="note" style="margin-left:.8rem"></span>
+    <div class="key" style="margin-top:.8rem"><span><i style="background:var(--accent)"></i>your GPU, float32</span><span><i style="background:var(--ref)"></i>PyTorch, float64</span><span><i style="background:var(--ref2)"></i>PyTorch, float32</span></div>
+    <svg id="chart" viewBox="0 0 640 260" role="img" aria-label="Training loss per step"></svg>
+    <table id="result"></table>
+  </div>
+  <h2>Generated text, and the evidence that matters</h2>
+  <p class="note">After training, your GPU and this project's float64 interpreter each continue the prompt greedily
+  (always the most likely next character), each from its own previous output, from the same float32 weights. The
+  correctness evidence is how many of those characters agree. The text itself is illustrative: a model this small,
+  trained for a minute, writes something only loosely like English, and no claim is made about its quality.</p>
+  <div class="card"><div id="agree" class="note">Not run yet.</div><p id="sample" class="sample"></p></div>
+  <p class="note" id="about"></p>
+  <p class="note">Text: Lewis Carroll, <i>Alice's Adventures in Wonderland</i>, Project Gutenberg eBook #11, public domain
+  in the United States; the body only, served from this repository and checked against its SHA-256 before use.
+  Nothing here is timed. The power mode of the machine is not readable from a browser; it is recorded only when this
+  page runs on the project's own local server.</p>
+</main>
+<script type="module">
+import { GpuRunner } from '../src/gpu/runtime.js';
+import { GpuTrainer } from '../src/gpu/trainer.js';
+import { initParams } from '../src/m3b/model.js';
+import { buildStep3b, paramShapes } from '../src/m3b/step.js';
+import { adamInitialState } from '../src/m3b/adam.js';
+import { encodeText, encodeBatch, textWindows } from '../src/m3b/data.js';
+import { evalLossCpu, forwardCpu, generateGreedy, interpLogitsAt } from '../src/m3b/cpu.js';
+import { causalityTrials } from '../src/m3b/verify-cpu.js';
+import { GREEDY_K } from '../src/m3b/config.js';
+import { gpuLogits } from '../src/gpu/harness-m3b.js';
+import { hashSources } from '../src/gpu/sources.js';
+import { M3B_SOURCE_FILES } from '../src/gpu/sources-m3b.js';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+function draw(f64, f32, gpu, steps) {
+  const W = 640, H = 260, L = 44, R = 10, T = 10, B = 28;
+  const ymax = Math.max(...f64.slice(0, 5), ...(gpu.length ? gpu.slice(0, 5) : [0])) * 1.05;
+  const x = (t) => L + (t / (steps - 1)) * (W - L - R);
+  const y = (v) => T + (1 - Math.min(v, ymax) / ymax) * (H - T - B);
+  const line = (vals) => vals.map((v, t) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const ticks = [0, ymax / 2, ymax].map((v) => `<text class="lbl" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(2)}</text>`).join('');
+  $('chart').innerHTML = `<line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/>
+    ${ticks}<text class="lbl" x="${W - R}" y="${H - 8}" text-anchor="end">step ${steps}</text><text class="lbl" x="${L}" y="${H - 8}">loss per step (nats per character)</text>
+    <polyline class="ref" points="${line(f64)}"/><polyline class="ref2" points="${line(f32)}"/>${gpu.length ? `<polyline class="gpu" points="${line(gpu)}"/>` : ''}`;
+}
+
+/**
+ * Amendment 26 as revised by R3: agreement over K tokens. A disagreement is a
+ * failure; the gap between the interpreter's top two logits there is reported.
+ */
+async function greedyAgreement(V, params, promptIds, runner) {
+  const onGpu = gpuLogits(runner, V, params);
+  const gpu = await generateGreedy(V, promptIds, GREEDY_K, (seq) => onGpu([seq]));
+  const cpu = await generateGreedy(V, promptIds, GREEDY_K, interpLogitsAt(V, params));
+  const k = gpu.tokens.findIndex((t, i) => t !== cpu.tokens[i]);
+  if (k < 0) return { k: GREEDY_K, agree: GREEDY_K, firstDisagreement: null, gap: null, gpuTokens: gpu.tokens, cpuTokens: cpu.tokens };
+  const sorted = [...cpu.steps[k].row].sort((a, b) => b - a);
+  return { k: GREEDY_K, agree: k, firstDisagreement: k, gap: sorted[0] - sorted[1], gpuTokens: gpu.tokens, cpuTokens: cpu.tokens };
+}
+
+try {
+  const [spec, torch] = await Promise.all([
+    fetch('../golden/spec-m3b.json').then((r) => r.json()),
+    fetch('../golden/torch-m3b.json').then((r) => r.json()),
+  ]);
+  const d = spec.demo;
+  const buf = await (await fetch(`../${spec.text.path}`)).arrayBuffer();
+  const digest = hex(await crypto.subtle.digest('SHA-256', buf));
+  if (digest !== spec.text.sha256) throw new Error(`${spec.text.path}: SHA-256 ${digest} is not the recorded ${spec.text.sha256}`);
+  const text = encodeText(new TextDecoder().decode(buf));
+  const V = text.vocab.length;
+  const t64 = torch.demo.float64, t32 = torch.demo.float32;
+  draw(t64.losses, t32.losses, [], d.steps);
+  if (!navigator.gpu) throw new Error('this browser has no WebGPU');
+  const runner = await GpuRunner.create();
+  const adapter = runner.info();
+  $('about').textContent = `Adapter: ${[adapter.vendor, adapter.architecture, adapter.description].filter(Boolean).join(' ')}. ${adapter.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] ?? ''}`;
+  $('go').disabled = false;
+  $('go').textContent = `Train ${d.steps} steps`;
+
+  $('go').onclick = async () => {
+    $('go').disabled = true;
+    try {
+      const step = buildStep3b(V, d.batch);
+      const init = Object.fromEntries(Object.entries(initParams(V, d.seed)).map(([k, v]) => [k, Float32Array.from(v)]));
+      const trainer = new GpuTrainer(runner, step, init, adamInitialState(step.names, paramShapes(V)));
+      const losses = [];
+      for (let t = 0; t < d.steps; t++) {
+        const { x, y } = encodeBatch(textWindows(text.ids, d.offsets[t]), V);
+        losses.push(await trainer.train(x, y));
+        if (t % 10 === 9 || t === d.steps - 1) { draw(t64.losses, t32.losses, losses, d.steps); $('status').textContent = `step ${t + 1} of ${d.steps}`; }
+      }
+      const params = Object.fromEntries(Object.entries(await trainer.read(step.names)).map(([k, v]) => [k, Float32Array.from(v)]));
+      trainer.destroy();
+      $('status').textContent = 'validation loss (float64 interpreter)…';
+      const valWindows = textWindows(text.ids, d.valOffsets);
+      const valLoss = evalLossCpu(V, params, valWindows);
+      const worst = Math.max(...losses.map((l, t) => Math.abs(l - t64.losses[t])));
+      $('result').innerHTML = `
+        <tr><td>validation loss, your GPU's weights</td><td class="n">${valLoss.toFixed(4)}</td></tr>
+        <tr><td>validation loss, PyTorch float64</td><td class="n">${t64.valLoss.toFixed(4)}</td></tr>
+        <tr><td>validation loss, PyTorch float32</td><td class="n">${t32.valLoss.toFixed(4)}</td></tr>
+        <tr><td>largest per-step loss difference from PyTorch float64</td><td class="n">${worst.toExponential(2)}</td></tr>`;
+
+      $('status').textContent = 'generating on your GPU and on the interpreter…';
+      const promptIds = [...d.prompt].map((c) => text.vocab.indexOf(c));
+      const greedy = await greedyAgreement(V, params, promptIds, runner);
+      const decode = (ids) => ids.map((i) => text.vocab[i]).join('');
+      const ok = greedy.agree === greedy.k;
+      $('agree').innerHTML = ok
+        ? `<span class="good">${greedy.agree} of ${greedy.k} characters agree</span> between your GPU and the float64 interpreter.`
+        : `<span class="bad">${greedy.agree} of ${greedy.k} characters agree</span>; the first disagreement is at character ${greedy.firstDisagreement + 1}, where the interpreter's top two logits differ by ${greedy.gap.toExponential(2)}.`;
+      $('sample').innerHTML = `<b>${esc(d.prompt)}</b>${esc(decode(greedy.gpuTokens))}`;
+
+      // Causality on the trained weights, on the GPU and the interpreter (amendment 26).
+      const causalSeqs = valWindows.slice(0, 4);
+      const causalityGpu = await causalityTrials(V, causalSeqs, gpuLogits(runner, V, params), { seed: 1 });
+      const causalityCpu = await causalityTrials(V, causalSeqs, (s) => forwardCpu(V, params, s).logits, { seed: 1 });
+      const maxScore = forwardCpu(V, params, causalSeqs).maxScore;
+      $('status').textContent = 'done';
+      const host = location.hostname;
+      const result = { demo: 'web/train-transformer.html', adapter, steps: d.steps, losses, valLoss, maxLossDifferenceFromTorch64: worst,
+        torchValLoss64: t64.valLoss, torchValLoss32: t32.valLoss, greedy, generated: decode(greedy.gpuTokens), causalityGpu, causalityCpu, maxScore };
+      if (new URLSearchParams(location.search).get('record') === '1' && (host === 'localhost' || host === '127.0.0.1')) {
+        const texts = await Promise.all(M3B_SOURCE_FILES.map((f) => fetch(`../${f}`, { cache: 'no-store' }).then((r) => r.text())));
+        const saved = await (await fetch('/record/gpu-m3b-demo.json', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...result, sourceHash: hashSources(texts) }) })).json();
+        $('status').textContent = `done; recorded ${saved.saved} (power mode ${saved.power?.activeMode})`;
+      }
+      window.__demo = result;
+    } catch (error) {
+      $('status').innerHTML = `<span class="bad">${esc(error.message ?? error)}</span>`;
+      window.__error = String(error.stack ?? error);
+    }
+    window.__done = true;
+  };
+} catch (error) {
+  $('go').textContent = 'Unavailable';
+  $('status').innerHTML = `<span class="bad">${esc(error.message ?? error)}</span>`;
+  window.__error = String(error);
+  window.__done = true;
+}
+</script>

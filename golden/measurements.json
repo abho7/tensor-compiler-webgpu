@@ -6257,5 +6257,527 @@
     "divBySquarePlusC": 10
    }
   }
+ },
+ "m3b": {
+  "producedBy": "node tools/measure.js (src/m3b/measure-m3b.js)",
+  "model": {
+   "T": 64,
+   "d": 64,
+   "H": 4,
+   "dh": 16,
+   "L": 2,
+   "ff": 256,
+   "eps": 0.00001,
+   "mask": -10000,
+   "params": {
+    "synthetic": 105872,
+    "text": 113483
+   },
+   "vocab": {
+    "synthetic": 16,
+    "text": 75
+   }
+  },
+  "torch": "2.14.1+cpu",
+  "cpu": {
+   "tau1": 1e-10,
+   "tau2": 1e-8,
+   "init": [
+    {
+     "name": "golden-seed1",
+     "worst": 0.000004013611600808886,
+     "worstOf": "logits",
+     "pass": true,
+     "logitsScore": 0.000004013611600808886,
+     "lossScore": 7.636191191640297e-7
+    },
+    {
+     "name": "golden-seed2",
+     "worst": 0.00000362071068001031,
+     "worstOf": "logits",
+     "pass": true,
+     "logitsScore": 0.00000362071068001031,
+     "lossScore": 7.481494160838272e-7
+    },
+    {
+     "name": "golden-seed3",
+     "worst": 0.000004368833543703837,
+     "worstOf": "logits",
+     "pass": true,
+     "logitsScore": 0.000004368833543703837,
+     "lossScore": 0.0000022052125176558424
+    },
+    {
+     "name": "golden-seed4",
+     "worst": 0.000004183143055683755,
+     "worstOf": "logits",
+     "pass": true,
+     "logitsScore": 0.000004183143055683755,
+     "lossScore": 0.0000015059568634131856
+    },
+    {
+     "name": "text-seed1",
+     "worst": 0.000005225420393884538,
+     "worstOf": "logits",
+     "pass": true,
+     "logitsScore": 0.000005225420393884538,
+     "lossScore": 0.000002947982480383305
+    }
+   ],
+   "training": [
+    {
+     "name": "golden-seed1",
+     "steps": 20,
+     "worstLoss": 3.9393101214040484e-8,
+     "worstProjection": 7.394055684567035e-9,
+     "finalWorst": 0.000001929787020607949,
+     "finalWorstOf": "b1.w1",
+     "firstFailure": null,
+     "pass": true,
+     "maxLossDiff": 2.220446049250313e-15
+    },
+    {
+     "name": "golden-seed2",
+     "steps": 20,
+     "worstLoss": 4.598780816538833e-8,
+     "worstProjection": 7.940854031943774e-9,
+     "finalWorst": 9.646154588761213e-7,
+     "finalWorstOf": "b0.w2",
+     "firstFailure": null,
+     "pass": true,
+     "maxLossDiff": 2.6645352591003757e-15
+    },
+    {
+     "name": "golden-seed3",
+     "steps": 20,
+     "worstLoss": 3.874306480477852e-8,
+     "worstProjection": 8.607562255734776e-9,
+     "finalWorst": 0.000008531625896847019,
+     "finalWorstOf": "b1.wv",
+     "firstFailure": null,
+     "pass": true,
+     "maxLossDiff": 2.220446049250313e-15
+    },
+    {
+     "name": "golden-seed4",
+     "steps": 20,
+     "worstLoss": 3.925819400516417e-8,
+     "worstProjection": 7.940395751749578e-9,
+     "finalWorst": 7.832808582421362e-8,
+     "finalWorstOf": "b0.wk",
+     "firstFailure": null,
+     "pass": true,
+     "maxLossDiff": 2.220446049250313e-15
+    }
+   ],
+   "properties": {
+    "causality": [
+     {
+      "config": "golden-seed1",
+      "t": 1,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed1",
+      "t": 17,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed1",
+      "t": 40,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed1",
+      "t": 63,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed2",
+      "t": 1,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed2",
+      "t": 17,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed2",
+      "t": 40,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed2",
+      "t": 63,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed3",
+      "t": 1,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed3",
+      "t": 17,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed3",
+      "t": 40,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed3",
+      "t": 63,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed4",
+      "t": 1,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed4",
+      "t": 17,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed4",
+      "t": 40,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     },
+     {
+      "config": "golden-seed4",
+      "t": 63,
+      "earlierIdentical": true,
+      "otherSequencesIdentical": true,
+      "laterChanged": true,
+      "pass": true
+     }
+    ],
+    "batchOrder": [
+     {
+      "config": "golden-seed1",
+      "logitsPermuted": true,
+      "gradScore": 0.0000030544764766561193,
+      "pass": true
+     },
+     {
+      "config": "golden-seed2",
+      "logitsPermuted": true,
+      "gradScore": 0.0000014198555927527844,
+      "pass": true
+     },
+     {
+      "config": "golden-seed3",
+      "logitsPermuted": true,
+      "gradScore": 0.000005145495874530301,
+      "pass": true
+     },
+     {
+      "config": "golden-seed4",
+      "logitsPermuted": true,
+      "gradScore": 0.0000012868494981799033,
+      "pass": true
+     }
+    ]
+   },
+   "largestScores": [
+    {
+     "config": "golden-seed1",
+     "maxScore": 1.7500601918460723
+    },
+    {
+     "config": "golden-seed2",
+     "maxScore": 1.7641462600375537
+    },
+    {
+     "config": "golden-seed3",
+     "maxScore": 2.024817076489028
+    },
+    {
+     "config": "golden-seed4",
+     "maxScore": 1.6692346094589259
+    }
+   ],
+   "sabotage": [
+    {
+     "name": "mask-off-by-one",
+     "bug": "causal mask lets row i see position i + 1",
+     "checks": {
+      "causality": {
+       "trials": 16,
+       "caught": 16
+      },
+      "batchOrder": {
+       "trials": 4,
+       "caught": 0
+      },
+      "torchInit": {
+       "trials": 5,
+       "caught": 5
+      },
+      "torchTraining": {
+       "trials": 4,
+       "caught": 4,
+       "firstFailures": [
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    },
+    {
+     "name": "scale-missing",
+     "bug": "attention scores not scaled by 1/sqrt(d_h)",
+     "checks": {
+      "causality": {
+       "trials": 16,
+       "caught": 0
+      },
+      "batchOrder": {
+       "trials": 4,
+       "caught": 0
+      },
+      "torchInit": {
+       "trials": 5,
+       "caught": 5
+      },
+      "torchTraining": {
+       "trials": 4,
+       "caught": 4,
+       "firstFailures": [
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    },
+    {
+     "name": "softmax-wrong-axis",
+     "bug": "attention softmax over the query axis",
+     "checks": {
+      "causality": {
+       "trials": 16,
+       "caught": 16
+      },
+      "batchOrder": {
+       "trials": 4,
+       "caught": 0
+      },
+      "torchInit": {
+       "trials": 5,
+       "caught": 5
+      },
+      "torchTraining": {
+       "trials": 4,
+       "caught": 4,
+       "firstFailures": [
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    },
+    {
+     "name": "ln-divisor",
+     "bug": "LayerNorm variance divided by d - 1",
+     "checks": {
+      "causality": {
+       "trials": 16,
+       "caught": 0
+      },
+      "batchOrder": {
+       "trials": 4,
+       "caught": 0
+      },
+      "torchInit": {
+       "trials": 5,
+       "caught": 5
+      },
+      "torchTraining": {
+       "trials": 4,
+       "caught": 4,
+       "firstFailures": [
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    },
+    {
+     "name": "ln-eps",
+     "bug": "LayerNorm eps 1e-3 instead of 1e-5",
+     "checks": {
+      "causality": {
+       "trials": 16,
+       "caught": 0
+      },
+      "batchOrder": {
+       "trials": 4,
+       "caught": 0
+      },
+      "torchInit": {
+       "trials": 5,
+       "caught": 5
+      },
+      "torchTraining": {
+       "trials": 4,
+       "caught": 4,
+       "firstFailures": [
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    },
+    {
+     "name": "merge-no-transpose",
+     "bug": "heads merged by a reshape without the transpose",
+     "checks": {
+      "causality": {
+       "trials": 16,
+       "caught": 16
+      },
+      "batchOrder": {
+       "trials": 4,
+       "caught": 0
+      },
+      "torchInit": {
+       "trials": 5,
+       "caught": 5
+      },
+      "torchTraining": {
+       "trials": 4,
+       "caught": 4,
+       "firstFailures": [
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    },
+    {
+     "name": "position-off-by-one",
+     "bug": "position p gets embedding row (p + 1) mod T",
+     "checks": {
+      "causality": {
+       "trials": 16,
+       "caught": 0
+      },
+      "batchOrder": {
+       "trials": 4,
+       "caught": 0
+      },
+      "torchInit": {
+       "trials": 5,
+       "caught": 5
+      },
+      "torchTraining": {
+       "trials": 4,
+       "caught": 4,
+       "firstFailures": [
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "vacuity": {
+   "run": "golden-seed1",
+   "step": 0,
+   "nodes": 1641,
+   "elements": 14844201,
+   "unjudgeable": 9488470,
+   "firstUnbounded": {
+    "node": 153,
+    "op": "div"
+   },
+   "streamIds": {
+    "embedding": 38,
+    "afterAttention0": 91,
+    "afterMlp0": 136
+   },
+   "streamMaxBound": {
+    "embedding": 0.00000107039338597363,
+    "afterAttention0": 0.005863398731779429,
+    "afterMlp0": 0.9461665589581769
+   },
+   "logits": [
+    {
+     "V": 16,
+     "logits": 1024,
+     "finite": 0
+    },
+    {
+     "V": 75,
+     "logits": 4800,
+     "finite": 0
+    }
+   ]
+  },
+  "gpu": null
  }
 }
