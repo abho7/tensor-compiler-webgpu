@@ -995,6 +995,310 @@ F8. **The statistical margin was far looser than what it ended up measuring.**
     difference is about 11 times larger. Both are inside every tolerance. Which kernels
     contribute (naive summation order, or WGSL's looser per-op accuracy) was not isolated.
 
+### Milestone 4 preconditions (2026-10-19), committed before any fusion code exists or any timing runs
+
+Milestone 4 asks the project's question: when does kernel fusion pay off on
+this integrated GPU, and when does it lose? It is the first milestone with
+timings. Everything below was written before any fusion code existed and
+before any kernel was timed. Changes after this point are dated revisions
+with before and after. The section "Fusion (milestone 4, criteria fixed in
+advance)" below was written at milestone 1 and still stands; where this is
+more specific, this governs.
+
+29. **Fusion is an IR-to-IR pass.** `fuse(graph, options)` returns a new graph
+    in which some groups of nodes are replaced by one `fused` node, plus a map
+    from each surviving node to the node of the original graph whose value it
+    carries. A fused node's attributes hold its **body**: an ordinary graph of
+    the existing ops, whose inputs are the fused node's operands. The
+    interpreter evaluates a fused node by evaluating its body. So semantic
+    preservation is checkable in pure JavaScript. The fused graph, run on the float64
+    interpreter, must give **bitwise identical** values to the original at
+    every surviving node: same ops, same operands, same order, the same summation order inside the body. No
+    tolerance. Checked by CI on milestone 2's fuzz corpus (`corpusProgram` 1 to
+    2,000, forward and gradient graphs) and on milestone 3b's training steps.
+    No file in `SOURCE_FILES` or `M3B_SOURCE_FILES` is edited, so milestones
+    3a's and 3b's recordings stay valid against their sources. The pass, its
+    code generator and its harnesses are new files with their own source list
+    and hash (`M4_SOURCE_FILES`), and milestone 4's GPU records are made from
+    those sources.
+
+30. **The fusion patterns, a fixed set.**
+    - **Elementwise.** A connected group of elementwise ops (`add` `sub` `mul`
+      `div` `neg` `exp` `log` `relu` `tanh` `sqrt` `step` `stopGradient`) of
+      one element count, with one output: its sink. A producer joins its
+      consumer's group only if every one of its consumers is in that group, so
+      nothing is computed twice. A `broadcast`, `reshape` or `transpose` whose
+      source is outside the group becomes an indexed load in the fused kernel
+      (it reads the source; no copy is made). A `reshape` of a value inside the
+      group is free, because elementwise kernels index by flat position. A scalar
+      constant, or one broadcast from a scalar, is inlined into the WGSL as its
+      exact float32 bit pattern. Any other constant is an operand.
+    - **Matmul epilogue.** A `matmul` whose only consumer is an elementwise
+      group of its own shape: the matmul kernel computes its sum, then
+      evaluates the group on it before storing, with the group's other
+      operands loaded at the output's index. This covers bias plus ReLU and bias plus
+      GELU (milestone 3b's tanh form). It uses the same naive or tiled matmul
+      as the unfused lowering, so the pair differs only in the epilogue.
+    - **Row-wise: LayerNorm, softmax, log-softmax.** A group over one
+      `[R, C]` iteration space, with C the last axis, containing reductions
+      (`sum`, `max`) over that axis with `keepDims`, whose results come back
+      into the group through `broadcast`, plus elementwise ops on whole rows
+      and on per-row scalars. One workgroup of 64 threads per row. Each
+      reduction is a per-thread strided partial, then a tree through
+      workgroup memory. Values over the row are recomputed in each phase that
+      needs them rather than stored. The group is labelled `layernorm` (two
+      sums and a `sqrt`), `softmax` (`max`, `exp`, `sum`, `div`),
+      `log-softmax` (`max`, `exp`, `sum`, `log`), or else `rowwise`. The
+      label is for reporting and sabotage only; the code generator is the same
+      for every label.
+    - **Attention (stretch).** Attempted only if everything else in this
+      milestone is recorded. If it is not attempted, the report says so.
+    Fixed limits: at most 6 operands per fused node, so that it binds within
+    WebGPU's default of 8 storage buffers per shader stage (6, the output and
+    the parameter block). A group that would exceed this stops growing. Every
+    kernel reads its sizes and strides from its parameter block at run time,
+    as the unfused kernels do, so a fused kernel is not specialised to a shape
+    the unfused one is not. Reductions not over the last axis, and the
+    loss's two plain sums, are not fused.
+    **Option `recompute`, off by default, for measuring losses.** With it on, an
+    elementwise producer may also join a group across a `broadcast` or
+    `transpose`, which recomputes it once per consumer element, and a producer
+    with several consumers is copied into each of their groups instead of
+    being stored once. This is the fusion the milestone-1 section above
+    expects to lose. It is measured on purpose and never used for the
+    training step.
+
+31. **Correctness first, before any timing.** Every fused kernel kind must
+    pass three checks before anything is timed.
+    - **Direct adversarial tests** (the correctness claim per kernel kind).
+      Built from small graphs that fuse into the intended kind. Element counts
+      1, 63, 64, 65, 1,000 and 100,003, and shapes `[3,5,7]` and `[1,7,1]`.
+      Matmul shapes off the 16-wide tile (17x33x19, 15x16x17, 1x64x1, batched
+      3x5x7x2). Rows of length C in {1, 7, 63, 64, 65, 257, 1000}. Large and
+      small magnitudes. Softmax rows at [400, 600], [-600, -400] and with -1e4
+      masks. LayerNorm rows that are constant (zero variance) or far from
+      zero. Every buffer has milestone 2's canary padding. Judged at the sink
+      by amendment 8's bound composed over the original small graph, `S = 2`.
+      Target: every case passes.
+    - **Differential fuzzer.** Generator v2 in float32 mode, `corpusProgram` 1
+      to 2,000, forward and gradient graphs, naive and tiled matmul, as in
+      milestone 2. Each run executes the unfused graph and the fused graph on the
+      GPU. Both are judged against the float64 interpreter, the fused one at
+      every surviving node, with amendment 8's composed bound and milestone 2's skip
+      rule (fuzz programs are small, so the composed bound is meaningful there,
+      unlike in a whole transformer step, R3). How often the fused and
+      unfused GPU values are bitwise identical is reported, not required.
+      Target: no unexplained failure.
+    - **The float32 budget on the real model**, node-local as in R3: the fused
+      training step of each of milestone 3b's four golden runs, all 20 steps.
+      Every launch is given the float32-rounded reference values of its own
+      operands. A fused node is judged against its body's float64 result by
+      the bound composed over its body. That is exactly the budget of the
+      unfused ops it replaces, as the milestone-1 section above requires.
+      Target: every step passes.
+    - **Sabotage, each bug injected alone**, and which check catches it first.
+      The checks run in this order: semantic preservation, direct tests, fuzzer (programs 1 to
+      500, to bound the run time), node-local training steps (golden run 1, first 2 steps).
+      1. Matmul epilogue: the activation applied before the bias is added.
+      2. Fused LayerNorm: its reductions' workgroup tree stops one level early,
+         so each mean and variance loses the second half of its last combine.
+      3. Fused softmax and log-softmax: the row maximum never subtracted.
+      4. A bounds bug at the last workgroup: the fused elementwise kernel's guard lets
+         index `n` through.
+      5. In the pass itself, not a kernel: a producer that still has a consumer
+         outside the group is absorbed, and that consumer is rewired to the
+         group's output.
+      Predictions, fixed now. Bugs 1 to 4 are invisible to semantic preservation,
+      because it never runs a kernel. Bug 5 is caught by it. The direct tests catch 1 to 4,
+      bug 3 through the large-input rows and bug 4 through the canaries. The fuzzer
+      cannot catch bug 2, because generator v2 never builds a LayerNorm, nor
+      bug 4, because its buffers are exact-size (milestone 2's finding). The
+      node-local training step catches 1 and 2 (the model has GELU epilogues and LayerNorms),
+      not 4 (exact-size buffers), and probably not 3, since the model's softmax inputs stay far
+      below exp's overflow. Every bug is caught by at least one check.
+
+32. **The timing protocol.**
+    - **Clock.** GPU timestamp queries. This adapter reports `timestamp-query`
+      (checked before writing this, along with its other limits: no kernel
+      was timed). Wall-clock time from `submit` to `onSubmittedWorkDone` is
+      recorded beside every timestamp result, never in place of it. If an
+      adapter lacks timestamps, the page falls back to wall-clock and says so
+      in the record.
+    - **One timed repetition** is one command buffer with one compute pass,
+      timestamped at its beginning and end. The pass contains the program's
+      dispatches k times over. k is fixed per workload during warm-up, so that a
+      repetition of the unfused variant takes at least 2 ms, and the fused
+      variant uses the same k. The time per program run is the pass time divided by k. This is
+      llm-inference-webgpu's method. It makes the browser's 65.5 µs timestamp
+      quantum (measured there) irrelevant, and it keeps per-submit costs out
+      of kernel time.
+    - **Order.** For each workload: 5 warm-up repetitions of each variant,
+      discarded. Then 32 timed repetitions of each, alternated in ABBA order,
+      so a slow drift affects both alike. Reported: the median time per
+      program run, the minimum and maximum, and every repetition.
+    - **What counts as a difference.** Fused is said to win (or lose) only if
+      the two variants' min-to-max ranges do not overlap. Otherwise the result
+      is "within noise", whatever the medians say. The speedup is the unfused median
+      over the fused median.
+    - **Power.** The machine's own setting: AC power, Windows overlay "Best
+      power efficiency" (milestone 3a's memory of this machine: it moves CPU timings
+      about 3.3x and the iGPU little, and nothing here is a CPU-against-GPU comparison).
+      The local server reports the power mode. The page reads it at the
+      start, after every workload and at the end. A session in which it
+      changes, or in which the machine is ever off AC, is discarded: logged
+      in the record and not reported as a result. A session is one load of
+      the benchmark page, and only results from one session are compared with
+      each other.
+    - **No GPU object creation inside the timed region.** Every buffer, bind
+      group, parameter block, pipeline and query set is made before timing
+      starts. The harness wraps the device's `create*` methods and
+      `queue.writeBuffer` with counters and records, per workload, how many
+      were called inside the timed region. Required: zero, except one command
+      encoder per repetition, which WebGPU requires (a command buffer cannot be
+      resubmitted). The counter is tested by breaking it: a deliberately
+      wrong mode that makes a bind group per repetition must be flagged.
+      This follows llm-inference-webgpu's lesson that creating objects per
+      step cost about half a decode step.
+    - **Correctness gates the timing.** The benchmark page refuses to run unless
+      `golden/gpu-m4.json` exists, was made from the current sources, and
+      passed every direct test and the fuzzer. Before timing a workload it also runs both
+      variants once and checks their outputs against the float64 interpreter
+      within amendment 8's budget. A workload that fails is recorded as failed
+      and not timed.
+
+33. **Achieved bandwidth.** For each memory-bound workload, the bytes a
+    variant must move are counted from the graph: for every kernel, each
+    operand buffer it reads (at its own size, once, as if every reuse hit
+    cache) plus its output. Achieved GB/s is bytes over median time. The
+    ceiling is measured on this adapter in the same session: llm-inference-webgpu's pure-read
+    kernel (`u32`, `vec2` and `vec4` loads at 256, 1,024 and 4,096 workgroups of
+    256 threads, over a 128 MiB buffer), plus a copy kernel (read and write, the
+    same widths), which is the ceiling an elementwise kernel faces. The best
+    configuration of each is reported as that ceiling. llm-inference-webgpu
+    measured 57.3 to 60.4 GB/s for pure reads; that figure is quoted for
+    comparison only, not used.
+
+34. **The sweep.** Every size includes values that are not multiples of the
+    64-thread workgroup or the 16-wide tile.
+    - Unary elementwise chains of length L in {1, 2, 4, 8, 16} (exp, tanh,
+      neg, sqrt-of-abs and similar, repeated) at n in {1,000, 65,537,
+      1,048,573, 4,194,301}.
+    - Binary chains (each op reads a fresh input) of length L in {1, 2, 4, 8}
+      at n in {65,537, 4,194,301}. The 6-operand limit splits L = 8.
+    - Matmul + bias + ReLU and + bias + GELU: `[M, K] x [K, N]` with
+      (M, K, N) in {(512, 64, 64), (512, 64, 256), (512, 256, 64),
+      (1000, 63, 257), (4096, 64, 256), (128, 1024, 128), (2048, 512, 512)},
+      naive and tiled.
+    - LayerNorm and softmax over R rows of length C: C in {1, 7, 64, 65, 256, 1000, 4096},
+      R in {1, 64, 4096, 65536}, capped at 2^26 elements.
+    - Losses on purpose: (a) across a broadcast. An expensive producer
+      (16 transcendental ops on `[C]`, C = 256) broadcast to `[R, C]` and added,
+      R in {16, 256, 4096}, in three variants: unfused, default fusion (the producer
+      stored once) and `recompute`. (b) Lost reuse. A producer of 1 or 16 ops
+      feeding 4 consumers, n = 1,048,573, with default fusion and with `recompute`.
+    - The training step (amendment 36).
+
+35. **Predictions, each with what would falsify it.**
+    - **P1. Unary chains at large n (≥ 1,048,573) are memory-bound.** The
+      unfused chain moves 2L·n floats, the fused one 2n, so the speedup should
+      grow with L, and be at least L/2 at L ≥ 2. Falsified if it does not increase from
+      L = 1 to L = 16, or is below L/2 at any L ≥ 2. At small n (1,000) the
+      cost per dispatch dominates, so the speedup should also grow with L. No size is
+      predicted there.
+    - **P2. Binary chains.** Traffic falls from 3L·n to (L + 2)·n, so at
+      n = 4,194,301 the speedup should rise with L but stay below 3. Falsified
+      if it exceeds 3 beyond noise, or falls as L rises from 1 to 4.
+    - **P3. Matmul epilogues help where the epilogue's traffic matters, and are
+      neutral where the matmul dominates.** Predicted to win for GELU (about a
+      dozen unfused kernels, some of them broadcasts of constants) at every
+      shape. Predicted to be neutral, within 10% or within noise, for ReLU at K ≥ 512.
+      A loss is possible from register pressure in the tiled kernel with a GELU
+      epilogue. If fused is slower beyond noise anywhere, that is reported as
+      the loss it is. Falsified as stated if GELU fusion does not win at some
+      shape, or ReLU at K ≥ 512 moves more than 10% beyond noise.
+    - **P4. Row-wise fusion wins big where rows are wide, and can lose where
+      they are narrow.** The unfused LayerNorm is about ten kernels, and its
+      reductions use one thread per row; the fused one is a single kernel, with
+      a 64-thread tree per row. Predicted speedup above 2 for C ≥ 64 and R ≥ 64.
+      Predicted loss for C ≤ 7 with R = 65,536, where most of each workgroup's
+      64 threads have nothing to do. That loss prediction is falsified if fused
+      still wins beyond noise at C = 1 and C = 7.
+    - **P5. Recomputing across a broadcast loses.** The recompute variant
+      evaluates the 16-op producer R times per element instead of once.
+      Predicted slower than the default fusion beyond noise for R ≥ 256, with
+      the gap growing with R. Falsified otherwise.
+    - **P6. Lost reuse.** Copying the producer into 4 consumer groups is predicted to lose
+      to storing it once when the producer is 16 ops, and to be neutral or
+      win when it is 1 op, since it saves a store and 4 reads. Falsified if the 16-op
+      case does not lose.
+    - **P7. The training step (milestone 3b's model, synthetic, B = 8 and
+      B = 16) is bounded by Amdahl's law.** Fusion removes almost only
+      non-matmul work. In the same session, the unfused step is also timed with only its
+      matmul dispatches (fraction s of the step). Predicted: speedup ≤ 1/s,
+      and within 1.25 if s ≥ 0.8 ("matmul-dominated", the brief's neutral case).
+      Falsified if the speedup exceeds 1/s beyond noise. (That would mean the
+      fused matmul-with-epilogue kernel itself got faster, which nothing here
+      intends.) I do not know s in advance and do not predict it.
+    - **P8. Against the hand-written kernels** (amendment 37), the compiler is
+      predicted to lose at matrix-vector shapes by at least 2x. Its matmuls run one
+      thread per output with a serial loop over K, where the hand-written
+      kernel gives each row a 256-thread tree and reads f16 weights. It is
+      predicted to be within noise, or within 20%, of the hand-written `ADD`
+      (the same one-thread-per-element design). Fused SwiGLU and RMSNorm are
+      predicted within 2x of the hand-written ones, and unfused ones slower than 2x.
+      Falsified per kernel as stated.
+    - **P9. Bandwidth.** At n = 4,194,301, every fused elementwise kernel is
+      predicted to reach at least half the measured copy ceiling. Falsified
+      below half.
+
+36. **Training, fused against unfused.**
+    - **Step time.** The milestone 3b training step (synthetic, V = 16) at
+      B = 8 and B = 16, and the text model (V = 75) at B = 16, timed per
+      amendment 32. The fused step, the unfused step, and the unfused step's
+      matmul dispatches alone, each beside the power mode.
+    - **A new, tighter statistical comparison**, replacing nothing (milestone
+      3b's result stands). The same 24 seeds, batch 8, 300 Adam steps,
+      synthetic task and validation loss as amendment 23 (iv), trained with the
+      **fused** step on the GPU. The paired differences, fused GPU minus PyTorch
+      float64, must pass a two one-sided t-test of equivalence at α = 0.05 with margin
+      **±1e-5 nats**. Justification, from milestone 3b's own spread (F8): there,
+      GPU minus PyTorch float64 had standard deviation 5.7e-7 over the 24 seeds, and
+      no seed differed by more than 2.6e-6. 1e-5 is about four times that
+      worst seed. If fused kernels behaved like unfused ones, the 90% interval
+      would be near ±2e-7, far inside. A tenfold wider spread would still pass.
+      A fused kernel that shifted the trained model by a hundred-thousandth of a
+      nat per character would fail. Second comparison, same test and margin:
+      fused GPU minus milestone 3b's recorded unfused GPU, paired by seed.
+      Whether any seed's fused trajectory is bitwise identical to the unfused
+      one is reported, and not predicted. The row-wise kernels sum in a different
+      order, so I expect it is not.
+
+37. **Baselines: llm-inference-webgpu's hand-written kernels**, copied
+    verbatim (with the commit and a SHA-256 of each) into
+    `src/fusion/llm-kernels.js`, on the shapes the two projects share, in
+    the same session as the compiler's versions:
+    - `ADD`: n = 896, and 52·896 (a 52-token prefill);
+    - `SWIGLU`: n = 4,864 and 52·4,864, against the IR's
+      `g / (1 + exp(-g)) · u`, unfused and fused;
+    - `RMSNORM`: rows 1 and 52 of 896, against the IR's
+      `x / sqrt(mean(x²) + eps) · gain`, unfused and fused (row-wise);
+    - `MATVEC`: 896x896 and 4,864x896, against the compiler's naive and tiled
+      matmul of `[1, 896]` by `[896, N]`.
+    Two differences are stated rather than hidden. The hand-written MATVEC and
+    RMSNORM read f16 weights and gains, where this compiler only has f32. And the
+    hand-written ADD and SWIGLU work in place. Byte counts for bandwidth use
+    each kernel's real traffic. For MATVEC an f32-weight copy of the
+    hand-written kernel (the same text, with `f16` replaced by `f32`) is also timed and labelled as
+    such, so the comparison at equal bytes exists too. The report says where the compiler loses.
+
+38. **What the report may claim.** One adapter (Intel Iris Xe, gen-12lp), one
+    machine, one browser, an integrated GPU sharing system memory. Every
+    timing carries its power mode. Nothing here is claimed to generalise to
+    discrete GPUs, other drivers or other browsers. CI cannot run the GPU: as
+    before, it checks that each recording came from the checked-in sources,
+    recomputes everything that needs no GPU (semantic preservation included),
+    and checks the report's figures against the recordings.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of
