@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tensor-compiler-webgpu</title>
 <link rel="canonical" href="https://abho7.github.io/tensor-compiler-webgpu/">
-<meta name="description" content="A small tensor compiler written from scratch: a static-shape IR, reverse-mode autodiff as a graph transform, a float64 reference interpreter, and WGSL lowering to come. Milestone 1 report.">
+<meta name="description" content="A small tensor compiler written from scratch: a static-shape IR, reverse-mode autodiff as a graph transform, a float64 reference interpreter, WGSL kernels, training on the GPU, and a pre-registered study of when kernel fusion pays off on an integrated GPU.">
 <style>
   :root {
     --ink: #16171b; --dim: #5c6068; --faint: #8b9099; --line: #e3e5e9; --bg: #fbfbfc;
@@ -62,10 +62,10 @@
     GPU, and when does it lose? That needs measured numbers, including the cases where fusion
     is neutral or slower. Fused kernels are only worth timing once they are known to compute
     the same thing as the unfused ones, so the first milestone is the reference everything
-    will be checked against. <b>This page reports milestones 1 and 2 of 4, the hardening pass
-    between them (1.5), and the first half of milestone 3 (3a: training an MLP).</b> The
-    transformer (3b) and the fusion study (4) are not done. Nothing earlier has been removed:
-    each milestone's record, failures and false alarms included, is further down, unchanged.</p>
+    is checked against. <b>This page reports all four milestones, newest first: the fusion study
+    (4), the transformer (3b), the MLP (3a), the GPU kernels (2), the hardening pass (1.5) and
+    the reference (1).</b> Nothing earlier has been removed: each milestone's record, failures
+    and false alarms included, is further down, unchanged.</p>
   </div>
 
   <div class="links">
@@ -78,10 +78,10 @@
   <div id="report">Loading measurements&hellip;</div>
 
   <footer>Every number on this page is read from <code>golden/measurements.json</code>, produced by
-  <code>node tools/measure.js</code>. Nothing so far is timed. Milestones 1 and 1.5 are deterministic
-  and CI recomputes them; milestone 2's GPU results are recorded by <code>web/gpu.html</code> in a
-  real browser, and CI checks they came from the sources checked in. Hover a figure for its full
-  value.</footer>
+  <code>node tools/measure.js</code>. Only milestone 4 is timed, and every timing carries its power
+  mode. Everything that needs no GPU is deterministic and CI recomputes it; GPU results are
+  recorded by the pages in <code>web/</code> in a real browser, and CI checks they came from the
+  sources checked in. Hover a figure for its full value.</footer>
 </main>
 
 <script type="module">
@@ -97,7 +97,7 @@ const n = (v) => Number(v).toLocaleString('en-US');
 const pct = (a, b) => `${(100 * a / b).toFixed(1)}%`;
 
 try {
-  const { m1, m1_5: H, m2: G, m2_followup: FU, m3: M3, m3b: M3B } = await (await fetch('golden/measurements.json')).json();
+  const { m1, m1_5: H, m2: G, m2_followup: FU, m3: M3, m3b: M3B, m4: M4 } = await (await fetch('golden/measurements.json')).json();
   const f = m1.fuzz, c = m1.fuzzCentral, s = m1.secondOrder, t = m1.torch, B = m1.budgets;
   const rules = m1.sabotage.rules;
   const allCaught = rules.every((r) => r.caughtAfter !== null);
@@ -156,6 +156,241 @@ try {
       <text x="${L - 6}" y="${yp(0) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">0</text>
       <text x="${W - R}" y="${Hh - 6}" text-anchor="end" fill="var(--faint)" font-size="11">step ${steps}</text>
       ${series.map((x) => `<polyline fill="none" stroke="${x.color}" stroke-width="2" points="${x.values.map((v, t) => `${xp(t).toFixed(1)},${yp(v).toFixed(1)}`).join(' ')}"/>`).join('')}</svg>`;
+  };
+
+  // Milestone 4: every figure from measurements.json's m4 section.
+  const m4Section = (X) => {
+    // layout-start: unit conversions and chart geometry, not measurements (the docs test skips this block)
+    const toMs = (us) => us / 1e3;
+    const MB = 1e6;
+    const chartW = 640, chartH = 240, padL = 52, padR = 12, padT = 12, padB = 34;
+    const colors = ['var(--accent)', 'var(--good)', 'var(--warn)', 'var(--bad)'];
+    // layout-end
+    const cfg = X.config, TH = cfg.thresholds, sem = X.semantics, GP = X.gpu, BN = X.bench;
+    const ok = (b) => (b ? 'good' : 'bad');
+    const held = (b) => `<b class="${ok(b)}">${b ? 'held' : 'failed'}</b>`;
+    const x2 = (v) => `${v.toFixed(2)}&times;`;
+    const us = (v) => (v >= 1e4 ? `${sci(toMs(v))} ms` : `${sci(v)} &micro;s`);
+    const verdictCls = { win: 'good', loss: 'bad', noise: 'note' };
+    const vcell = (x) => (x ? `<td class="n ${verdictCls[x.verdict]}">${x2(x.speedup)} <span class="note">${x.verdict}</span></td>` : '<td></td>');
+    const bugName4 = { 'epilogue-before-bias': 'matmul epilogue: activation applied before the bias', 'layernorm-tree-short': 'fused LayerNorm: reduction tree one level short',
+      'softmax-no-max': 'fused softmax: row maximum never subtracted', 'fused-bounds-off-by-one': 'fused elementwise: guard lets index n through',
+      'fusion-absorbs-shared': 'the pass: absorbs a value still used outside its group' };
+    const checkName4 = { semantics: 'semantics (pure JS)', direct: 'direct tests', fuzz: 'fuzzer', step: 'node-local, training step', forward: 'node-local, forward (R5)' };
+    const checkOrder = Object.keys(checkName4);
+    if (!GP) return `<h2>Milestone 4: fusion</h2><p>No GPU recording yet.</p>`;
+    const st = GP.statistical, tf = GP.teacherForced, fw = GP.forward, R1 = X.gpuRun1;
+    const corpusSem = sem.corpus;
+
+    const correctness = `
+  <h3>Correctness first: before anything was timed</h3>
+  <div class="wrap"><table class="claims">
+    <tr><th>check</th><th>measured</th><th>against</th></tr>
+    <tr><td>The fused graph means what the original means (pure JS; CI recomputes it)</td>
+      <td class="n ${ok(corpusSem.identical === corpusSem.graphs && sem.model.every((m) => m.identical))}">${n(corpusSem.identical)} of ${n(corpusSem.graphs)} corpus graphs; ${sem.model.filter((m) => m.identical).length} of ${sem.model.length} model graphs</td>
+      <td>bitwise identical float64 values at every surviving node; ${n(corpusSem.withFused)} of the corpus graphs contain at least one fused node (${n(corpusSem.fusedNodes)} in all)</td></tr>
+    <tr><td>Direct adversarial tests of every fused kernel kind</td>
+      <td class="n ${ok(GP.direct.passed === GP.direct.cases)}">${GP.direct.passed} of ${GP.direct.cases}</td>
+      <td>amendment 8's budget composed over the small graph, canary-padded buffers; ${Object.entries(GP.direct.byPattern).map(([k, v]) => `${esc(k)} ${v.passed}/${v.cases}`).join(', ')}; worst ${sci(GP.direct.worst)} of the budget</td></tr>
+    <tr><td>Differential fuzzer: unfused and fused on the GPU, both against the interpreter</td>
+      <td class="n ${ok(GP.fuzz.fusedPassed === GP.fuzz.runs && !GP.fuzz.errors)}">fused ${n(GP.fuzz.fusedPassed)} of ${n(GP.fuzz.runs)} runs; unfused ${n(GP.fuzz.unfusedPassed)}</td>
+      <td>${n(GP.fuzz.programs)} corpus programs, forward and gradient, naive and tiled matmul; ${n(GP.fuzz.fusedRuns)} runs had a fused node; worst ${sci(GP.fuzz.worstFused)} of the budget (unfused ${sci(GP.fuzz.worstUnfused)}); fused and unfused GPU values bitwise identical in ${n(GP.fuzz.bitwiseSame)} runs${R1 ? `. <b class="warn">The first recording failed here:</b> ${R1.errors} runs (programs ${[...new Set(R1.failures.map((f) => f.program))].join(', ')}) could not be compiled, a bug in my pass that this fuzzer found (DESIGN.md F10)` : ''}</td></tr>
+    <tr><td>The fused training step, node-local, every step of the four golden runs</td>
+      <td class="n ${ok(tf.passed === tf.steps)}">${tf.passed} of ${tf.steps} steps</td>
+      <td>each launch on float32-rounded reference operands, a fused node judged by the bound composed over its body; ${n(tf.launches)} launches instead of ${n(tf.unfusedLaunches)}; worst ${sci(tf.worst)} of the budget</td></tr>
+    <tr><td>The fused forward pass, node-local (revision R5)</td>
+      <td class="n ${ok(fw.passed === fw.configs)}">${fw.passed} of ${fw.configs} configs</td>
+      <td>${n(fw.launches)} launches instead of ${n(fw.unfusedLaunches)}, with every pattern: ${fw.patterns.map(esc).join(', ')}; worst ${sci(fw.worst)}</td></tr>
+    <tr><td>The fused trainer against the checked path</td>
+      <td class="n ${ok(GP.consistency.identical)}">${GP.consistency.identical ? 'identical' : 'different'}</td><td>bit for bit, ${GP.consistency.steps} steps</td></tr>
+  </table></div>
+
+  <h3>Training, fused, against PyTorch and against the unfused run: a tighter margin</h3>
+  <div class="wrap"><table>
+    <tr><th>comparison (${st.seeds} seeds, validation loss)</th><th>mean</th><th>${Math.round(100 * (1 - 2 * st.alpha))}% interval</th><th>margin</th><th>range over seeds</th><th></th></tr>
+    ${[['fused GPU &minus; PyTorch float64 (registered)', st.fusedVsTorch64], ['fused GPU &minus; unfused GPU from milestone 3b (registered)', st.fusedVsUnfused],
+      ['unfused GPU &minus; PyTorch float64 (context: milestone 3b under the new margin)', st.unfusedVsTorch64]].map(([k, x]) => `<tr><td>${k}</td>
+      <td class="n">${sci(x.mean)}</td><td class="n">${sci(x.lower)} to ${sci(x.upper)}</td><td class="n">&plusmn;${sci(x.margin)}</td>
+      <td class="n">${sci(x.min)} to ${sci(x.max)}</td><td class="${x.pass ? 'good' : 'bad'}">${x.pass ? 'equivalent' : 'not shown'}</td></tr>`).join('')}
+  </table></div>
+  <p class="note">Milestone 3b's margin was &plusmn;${cfg.m3bStatMargin} nats, which its own spread showed to be far looser than needed. The new one,
+  &plusmn;${sci(cfg.statMargin)}, was registered from that spread before the fused run. Fused and unfused trajectories are not bitwise identical:
+  ${st.identicalValLoss} of ${st.seeds} seeds end on the same validation loss and ${st.identicalFinalTrainLoss} on the same last training loss, and seed 1's losses first
+  differ at step ${st.seed1.firstDifferentStep}. The row-wise kernels reduce in a different order than the unfused ones, and that was expected.</p>
+
+  <h3>Injected bugs, against every check</h3>
+  <div class="wrap"><table>
+    <tr><th>bug</th>${checkOrder.map((c) => `<th>${checkName4[c]}</th>`).join('')}<th>caught first by</th></tr>
+    ${GP.sabotage.map((b) => `<tr><td>${bugName4[b.name] ?? esc(b.name)}</td>${checkOrder.map((c) => {
+      const x = b.checks[c];
+      return `<td class="n ${x.caught ? '' : 'note'}">${x.caught} / ${n(x.trials)}${x.threw ? ` <span class="warn">(threw ${n(x.threw)})</span>` : ''}</td>`;
+    }).join('')}<td>${b.caughtFirstBy ? checkName4[b.caughtFirstBy] : '<span class="bad">nothing</span>'}</td></tr>`).join('')}
+  </table></div>
+  <p>Predicted before anything ran (amendment 31): the semantic check catches only the bug in the pass; the direct tests catch the four kernel bugs;
+  the fuzzer cannot see the LayerNorm or the bounds bug; the node-local training step catches the epilogue and LayerNorm bugs. ${(() => {
+    const missed = GP.sabotage.flatMap((b) => Object.entries(b.asPredicted).filter(([, v]) => !v).map(([k]) => `${bugName4[b.name]} (${checkName4[k]})`));
+    return missed.length ? `<b class="bad">Not as predicted:</b> ${missed.join('; ')}. The training step has no fused LayerNorm and no epilogue with an activation for these bugs to touch, because autodiff stores those patterns' insides for the backward pass (revision R5); the forward pass, which has them, caught both.` : 'Every prediction held.';
+  })()} "Threw" counts the sabotaged pass failing loudly (building a graph that uses a value before defining it), kept apart from catches.</p>`;
+
+    if (!BN) return `<h2>Milestone 4: fusion</h2>${correctness}<p>No timing session recorded yet.</p>`;
+    const P = BN.predictions, rows = BN.rows, get = (id) => rows.find((r) => r.id === id);
+    const fam = (f) => rows.filter((r) => r.family === f);
+
+    // Speedup against chain length, one line per size.
+    const chainChart = (() => {
+      const unary = fam('chain-unary');
+      const sizes = [...new Set(unary.map((r) => r.params.n))];
+      const Ls = [...new Set(unary.map((r) => r.params.L))];
+      const ymax = Math.max(...unary.map((r) => r.fused.speedup)) * 1.08;
+      const xp = (i) => padL + (i / (Ls.length - 1)) * (chartW - padL - padR), yp = (v) => padT + (1 - v / ymax) * (chartH - padT - padB);
+      return `<svg viewBox="0 0 ${chartW} ${chartH}" role="img" aria-label="Fusion speedup against chain length" style="width:100%;height:auto">
+        <line x1="${padL}" y1="${chartH - padB}" x2="${chartW - padR}" y2="${chartH - padB}" stroke="var(--line)"/><line x1="${padL}" y1="${padT}" x2="${padL}" y2="${chartH - padB}" stroke="var(--line)"/>
+        <line x1="${padL}" y1="${yp(1)}" x2="${chartW - padR}" y2="${yp(1)}" stroke="var(--faint)" stroke-dasharray="4 4"/>
+        <text x="${padL - 6}" y="${yp(1) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">1&times;</text>
+        <text x="${padL - 6}" y="${yp(ymax) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">${ymax.toFixed(1)}&times;</text>
+        ${Ls.map((L, i) => `<text x="${xp(i)}" y="${chartH - padB + 16}" text-anchor="middle" fill="var(--faint)" font-size="11">L ${L}</text>`).join('')}
+        ${sizes.map((s, k) => `<polyline fill="none" stroke="${colors[k % colors.length]}" stroke-width="2" points="${Ls.map((L, i) => `${xp(i).toFixed(1)},${yp(unary.find((r) => r.params.n === s && r.params.L === L).fused.speedup).toFixed(1)}`).join(' ')}"/>`).join('')}
+      </svg><p class="note">Fused over unfused median time for a unary chain of length L. ${sizes.map((s, k) => `<span style="color:${colors[k % colors.length]}">n = ${n(s)}</span>`).join(', ')}.</p>`;
+    })();
+
+    // Achieved bandwidth against bytes moved, every timed variant, with the measured ceilings.
+    const bwChart = (() => {
+      const pts = rows.filter((r) => !r.failedGate).flatMap((r) => Object.entries(r.variants).filter(([k, v]) => v && v.bytes && k !== 'matmul-only').map(([k, v]) => ({ k, bytes: v.bytes, gbs: v.gbs, id: r.id })));
+      const lx = pts.map((p) => Math.log10(p.bytes)), x0 = Math.floor(Math.min(...lx)), x1 = Math.ceil(Math.max(...lx));
+      const ymax = Math.max(BN.ceiling.read.gbs, BN.ceiling.copy.gbs, ...pts.map((p) => p.gbs)) * 1.08;
+      const xp = (b) => padL + ((Math.log10(b) - x0) / (x1 - x0)) * (chartW - padL - padR), yp = (v) => padT + (1 - v / ymax) * (chartH - padT - padB);
+      const col = (k) => (k === 'fused' || k === 'recompute' ? 'var(--accent)' : k === 'unfused' ? 'var(--faint)' : 'var(--warn)');
+      return `<svg viewBox="0 0 ${chartW} ${chartH}" role="img" aria-label="Achieved bandwidth against bytes moved" style="width:100%;height:auto">
+        <line x1="${padL}" y1="${chartH - padB}" x2="${chartW - padR}" y2="${chartH - padB}" stroke="var(--line)"/><line x1="${padL}" y1="${padT}" x2="${padL}" y2="${chartH - padB}" stroke="var(--line)"/>
+        ${[['read', BN.ceiling.read.gbs], ['copy', BN.ceiling.copy.gbs]].map(([k, v]) => `<line x1="${padL}" y1="${yp(v)}" x2="${chartW - padR}" y2="${yp(v)}" stroke="var(--bad)" stroke-dasharray="4 4"/>
+          <text x="${chartW - padR}" y="${yp(v) - 4}" text-anchor="end" fill="var(--bad)" font-size="11">${k} ceiling ${v.toFixed(1)} GB/s</text>`).join('')}
+        <text x="${padL - 6}" y="${yp(0) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">0</text>
+        <text x="${padL}" y="${chartH - padB + 16}" fill="var(--faint)" font-size="11">${sci(10 ** x0 / MB)} MB</text>
+        <text x="${chartW - padR}" y="${chartH - padB + 16}" text-anchor="end" fill="var(--faint)" font-size="11">${sci(10 ** x1 / MB)} MB moved (log)</text>
+        ${pts.map((p) => `<circle cx="${xp(p.bytes).toFixed(1)}" cy="${yp(p.gbs).toFixed(1)}" r="2.5" fill="${col(p.k)}"><title>${esc(p.id)} ${esc(p.k)}: ${p.gbs.toFixed(1)} GB/s</title></circle>`).join('')}
+      </svg><p class="note">Every timed variant: bytes it must move (each operand read once, plus its output; amendment 33) over its median time.
+      Blue fused, grey unfused, amber hand-written. Dashed: the ceilings measured in the same session. Hover a point for its workload.</p>`;
+    })();
+
+    const rowTable = (f) => {
+      const rs = fam(f);
+      const Cs = [...new Set(rs.map((r) => r.params.C))], Rs = [...new Set(rs.map((r) => r.params.R))];
+      return `<div class="wrap"><table><tr><th>${esc(f)}: R &darr; C &rarr;</th>${Cs.map((c) => `<th>${n(c)}</th>`).join('')}</tr>
+        ${Rs.map((R) => `<tr><td>${n(R)}</td>${Cs.map((C) => { const r = rs.find((x) => x.params.R === R && x.params.C === C); return r ? vcell(r.fused) : '<td class="note">over the cap</td>'; }).join('')}</tr>`).join('')}
+      </table></div>`;
+    };
+
+    const predRows = [
+      ['P1', `Unary chains at n &ge; ${n(TH.p1MinN)} are memory-bound: the speedup grows with L and is at least L&middot;${TH.p1Fraction} for L &ge; 2`,
+        P.P1.per.map((p) => `n = ${n(p.n)}: ${p.speedups.map((s) => `L ${s.L} ${x2(s.speedup)}`).join(', ')}${p.belowHalfL.length ? ` (below L&middot;${TH.p1Fraction} at L ${p.belowHalfL.join(', ')})` : ''}`).join('<br>'), P.P1.held],
+      ['P2', `Binary chains at n = ${n(TH.bigN)}: the speedup rises with L and stays below ${TH.p2Ceiling}`,
+        `${P.P2.speedups.map((s) => `L ${s.L} ${x2(s.speedup)} (${s.launchesFused} fused launch${s.launchesFused === 1 ? '' : 'es'})`).join(', ')}${P.P2.over3BeyondNoise.length ? `; above ${TH.p2Ceiling} beyond noise at L ${P.P2.over3BeyondNoise.join(', ')}` : ''}${P.P2.fallsFrom1To4 ? '; falls from L 1 to L 4' : ''}`, P.P2.held],
+      ['P3', `Matmul epilogues: GELU wins at every shape; ReLU at K &ge; ${TH.p3ReluK} is neutral (within ${100 * TH.p3Neutral}% or noise)`,
+        `GELU wins ${P.P3.gelu.filter((g) => g.verdict === 'win').length} of ${P.P3.gelu.length}; ReLU at large K: ${P.P3.reluK512.map((r) => `${esc(r.id)} ${x2(r.speedup)} ${r.verdict}`).join(', ')}${P.P3.losses.length ? `; <b class="bad">losses:</b> ${P.P3.losses.map((l) => `${esc(l.id)} ${x2(l.speedup)}`).join(', ')}` : ''}`, P.P3.held],
+      ['P4', `Row-wise fusion: above ${TH.p4Speedup}&times; for C &ge; ${TH.p4WideC}, R &ge; ${TH.p4WideR}; a loss for C &le; ${TH.p4NarrowC} at R = ${n(TH.p4NarrowR)}`,
+        `wide rows above ${TH.p4Speedup}&times;: ${P.P4.wideAbove2} of ${P.P4.wideCount} (${held(P.P4.winHeld)}); narrow rows: ${P.P4.narrow.map((r) => `${esc(r.id)} ${x2(r.speedup)} ${r.verdict}`).join(', ')} (${held(P.P4.lossHeld)})`, P.P4.winHeld && P.P4.lossHeld],
+      ['P5', `Recomputing a ${n(get('broadcast-recompute-R16').params.ops)}-op producer across a broadcast loses to storing it once for R &ge; ${TH.p5MinR}, more so as R grows`,
+        P.P5.ratio.map((x) => `R ${n(x.R)}: recompute ${x2(x.recomputeOverFused)} the time of default fusion (${x.verdict})`).join(', '), P.P5.held],
+      ['P6', `Copying a producer into its ${get('lost-reuse-1op').params.consumers} consumers loses when it is ${get('lost-reuse-16op').params.ops} ops, not when it is ${get('lost-reuse-1op').params.ops}`,
+        `1 op: recompute against stored ${x2(P.P6.op1.recomputeVsFused.speedup)} (${P.P6.op1.recomputeVsFused.verdict}); 16 ops: ${x2(P.P6.op16.recomputeVsFused.speedup)} (${P.P6.op16.recomputeVsFused.verdict})`, P.P6.held],
+      ['P7', `The training step's speedup is at most Amdahl's 1/s, where s is the matmul share; within ${TH.p7Within} if s &ge; ${TH.p7Dominated}`,
+        P.P7.steps.map((s) => `${esc(s.id)}: s = ${s.matmulShare.toFixed(2)}, bound ${x2(s.amdahlBound)}, measured ${x2(s.speedup)}`).join('<br>'), P.P7.held],
+      ['P8', `Against hand-written kernels: the compiler loses by &ge; ${TH.p8Matvec}&times; at matrix-vector shapes; matches ADD within ${100 * TH.p8Add}% or noise; fused SwiGLU and RMSNorm within ${TH.p8Within}&times;, unfused not`,
+        `matvec ${P.P8.matvec.map((m) => `${m.rows}&times;${m.cols}: compiler ${x2(m.compilerOverHand)} slower (${held(P.P8.matvecHeld)})`).join(', ')}; ADD ${P.P8.add.map((a) => `n ${n(a.n)} ${x2(a.compilerOverHand)}`).join(', ')} (${held(P.P8.addHeld)}); SwiGLU fused ${P.P8.swiglu.map((s) => x2(s.fusedOverHand)).join(', ')} / unfused ${P.P8.swiglu.map((s) => x2(s.unfusedOverHand)).join(', ')} (${held(P.P8.swigluHeld)}); RMSNorm fused ${P.P8.rmsnorm.map((s) => x2(s.fusedOverHand)).join(', ')} / unfused ${P.P8.rmsnorm.map((s) => x2(s.unfusedOverHand)).join(', ')} (${held(P.P8.rmsnormHeld)})`, P.P8.held],
+      ['P9', `Fused elementwise kernels at n = ${n(TH.bigN)} reach at least ${TH.p9Fraction} of the copy ceiling`,
+        `copy ceiling ${P.P9.copyCeiling.toFixed(1)} GB/s; ${P.P9.fused.map((f) => `${esc(f.id)} ${f.gbs.toFixed(1)} GB/s (${(100 * f.fractionOfCopy).toFixed(0)}%)`).join(', ')}`, P.P9.held],
+    ];
+    const heldCount = predRows.filter((p) => p[3]).length;
+
+    const modelRows = [...fam('forward'), ...fam('training-step')];
+    const handRows = rows.filter((r) => r.family.startsWith('baseline-'));
+    const handCols = ['unfused', 'fused', 'hand', 'hand-f32'];
+
+    return `
+  <h2>Milestone 4: when kernel fusion pays off on this integrated GPU, and when it loses</h2>
+  <p>A fusion pass, IR to IR, replaces groups of nodes with one fused node whose body is an ordinary graph: elementwise chains,
+  a matmul with its epilogue, and row-wise LayerNorm, softmax and log-softmax. The interpreter evaluates a fused node by evaluating
+  its body, so whether fusion preserves meaning is a pure-JavaScript check, run by CI. Everything was pre-registered in DESIGN.md
+  (amendments 29 to 38) before any fusion code existed. Two revisions (R5, R6) were logged before any kernel was timed. Attention
+  fusion, the stretch goal, was not attempted.</p>
+  <div class="card lead"><p style="margin:0"><b>Answer, for this adapter only:</b> fused beat unfused beyond noise in
+  ${BN.fusedVerdicts.win} of ${BN.fusedVerdicts.win + BN.fusedVerdicts.loss + BN.fusedVerdicts.noise} timed workloads, lost in ${BN.fusedVerdicts.loss},
+  and was within noise in ${BN.fusedVerdicts.noise}. ${heldCount} of ${predRows.length} pre-registered predictions held.
+  ${(() => { const s = get('step-V16-B8'); return `At batch ${s.params.B}, the fused training step took ${x2(1 / s.fused.speedup)} the unfused step's time (${s.fused.verdict})`; })()};
+  at matrix-vector shapes the compiler's best matmul took ${x2(P.P8.matvec[0].compilerOverHand)} the hand-written kernel's time.</p></div>
+  ${correctness}
+
+  <h3>How it was timed</h3>
+  <p>GPU timestamp queries (${BN.adapter.timestampQuery ? 'available' : 'not available; wall-clock used'}) around one compute pass that holds k runs of a program,
+  k chosen so a repetition takes at least ${cfg.targetMsPerRep} ms; ${cfg.warmup} warm-ups discarded, then ${cfg.reps} repetitions of each variant in ABBA order,
+  in one session. Fused wins or loses only when the two min-to-max ranges do not overlap; otherwise it is noise. Power: <b>${esc(BN.power.acOverlay)}</b>
+  overlay, ${BN.power.onAC ? 'on AC' : 'on battery'}, read before, after the ceiling, after each of the ${n(BN.counts.workloads)} workloads and at the end:
+  ${BN.power.changed ? '<b class="bad">it changed</b>' : 'unchanged'}. ${X.discardedSessions.length ? `${X.discardedSessions.length} earlier session(s) were discarded for power.` : 'No session was discarded.'}
+  Every buffer, bind group and pipeline was made before timing; counters on the device found ${BN.counts.withViolations} workloads with any object made inside a timed
+  region other than the one command encoder per repetition. The counter was itself tested: a mode that makes a bind group per dispatch was flagged
+  (${n(BN.counterSelfTest.leaky.createBindGroup ?? 0)} bind groups). ${BN.counts.failedGate ? `<b class="bad">${BN.counts.failedGate} workloads failed the correctness gate and were not timed.</b>` : 'Every workload passed its correctness gate before it was timed.'}
+  Bandwidth ceiling, measured in the same session over ${cfg.ceilingBytes / 2 ** 20} MiB: pure read ${BN.ceiling.read.gbs.toFixed(1)} GB/s (${esc(BN.ceiling.read.config)}), copy
+  ${BN.ceiling.copy.gbs.toFixed(1)} GB/s (${esc(BN.ceiling.copy.config)}).</p>
+
+  <h3>Predictions against measurements</h3>
+  <div class="wrap"><table class="claims">
+    <tr><th></th><th>registered prediction</th><th>measured</th><th></th></tr>
+    ${predRows.map(([k, pred, meas, h]) => `<tr><td>${k}</td><td>${pred}</td><td>${meas}</td><td>${held(h)}</td></tr>`).join('')}
+  </table></div>
+
+  <h3>Elementwise chains</h3>
+  ${chainChart}
+  <div class="wrap"><table><tr><th>workload</th><th>unfused</th><th>fused</th><th>launches</th><th>fused GB/s</th><th>speedup</th></tr>
+    ${[...fam('chain-unary'), ...fam('chain-binary')].map((r) => `<tr><td>${esc(r.id)}</td><td class="n">${us(r.variants.unfused.median)}</td><td class="n">${us(r.variants.fused.median)}</td>
+      <td class="n">${r.variants.unfused.launches} &rarr; ${r.variants.fused.launches}</td><td class="n">${r.variants.fused.gbs.toFixed(1)}</td>${vcell(r.fused)}</tr>`).join('')}
+  </table></div>
+
+  <h3>Matmul with bias and activation</h3>
+  <div class="wrap"><table><tr><th>workload</th><th>unfused</th><th>fused</th><th>launches</th><th>speedup</th></tr>
+    ${fam('matmul-epilogue').map((r) => `<tr><td>${esc(r.id)}</td><td class="n">${us(r.variants.unfused.median)}</td><td class="n">${us(r.variants.fused.median)}</td>
+      <td class="n">${r.variants.unfused.launches} &rarr; ${r.variants.fused.launches}</td>${vcell(r.fused)}</tr>`).join('')}
+  </table></div>
+
+  <h3>LayerNorm and softmax, by rows R and row length C</h3>
+  ${rowTable('layernorm')}${rowTable('softmax')}
+  <p class="note">Speedup of fused over unfused. Rows of length 1 are left to elementwise fusion (a row-wise kernel needs C &gt; 1); rows beyond
+  ${n(cfg.rowCap)} elements were dropped by revision R6.</p>
+
+  <h3>Where fusion is meant to lose: recomputation</h3>
+  <div class="wrap"><table><tr><th>workload</th><th>unfused</th><th>default fusion</th><th>recompute</th><th>default vs unfused</th><th>recompute vs default</th></tr>
+    ${[...fam('broadcast-recompute'), ...fam('lost-reuse')].map((r) => `<tr><td>${esc(r.id)}</td><td class="n">${us(r.variants.unfused.median)}</td>
+      <td class="n">${us(r.variants.fused.median)}</td><td class="n">${us(r.variants.recompute.median)}</td>${vcell(r.fused)}${vcell(r.recomputeVsFused)}</tr>`).join('')}
+  </table></div>
+
+  <h3>The transformer: forward pass and training step</h3>
+  <div class="wrap"><table><tr><th>workload</th><th>unfused</th><th>fused</th><th>matmul only</th><th>launches</th><th>speedup</th><th>fused vs unfused outputs</th></tr>
+    ${modelRows.map((r) => `<tr><td>${esc(r.id)}</td><td class="n">${us(r.variants.unfused.median)}</td><td class="n">${us(r.variants.fused.median)}</td>
+      <td class="n">${r.variants['matmul-only'] ? `${us(r.variants['matmul-only'].median)} (share ${r.matmulShare.toFixed(2)})` : ''}</td>
+      <td class="n">${n(r.variants.unfused.launches)} &rarr; ${n(r.variants.fused.launches)}</td>${vcell(r.fused)}
+      <td class="n">largest difference ${sci(r.fusedVsUnfusedOutputs.maxAbs)}</td></tr>`).join('')}
+  </table></div>
+  <p class="note">Power mode for all of these: ${esc(BN.power.acOverlay)}, ${BN.power.onAC ? 'on AC' : 'on battery'}. The model's composed float32 bound is vacuous
+  (milestone 3b's R3), so its gate was the recorded node-local check, and the fused and unfused outputs are compared here with no tolerance (R6).</p>
+
+  <h3>Against llm-inference-webgpu's hand-written kernels</h3>
+  <div class="wrap"><table><tr><th>shape</th>${handCols.map((c) => `<th>${c === 'hand-f32' ? 'hand, f32 weights' : c}</th>`).join('')}<th>compiler's best against hand</th></tr>
+    ${handRows.map((r) => `<tr><td>${esc(r.id)}</td>${handCols.map((c) => `<td class="n">${r.variants[c] ? `${us(r.variants[c].median)} <span class="note">${r.variants[c].gbs.toFixed(1)} GB/s</span>` : ''}</td>`).join('')}
+      <td class="n ${r.handVsCompiler.verdict === 'win' ? 'bad' : r.handVsCompiler.verdict === 'loss' ? 'good' : 'note'}">${x2(1 / r.handVsCompiler.speedup)} the time (${esc(r.handVsCompiler.compiler)})</td></tr>`).join('')}
+  </table></div>
+  <p class="note">Copied verbatim from llm-inference-webgpu at commit ${esc(BN.llm.commit)}. The hand-written MATVEC and RMSNORM read f16 weights and gains, half the
+  bytes of this compiler's f32; the f32 copy of MATVEC changes only the storage type. The hand-written ADD and SWIGLU work in place.</p>
+
+  <h3>Bandwidth</h3>
+  ${bwChart}
+
+  <h3>Every loss</h3>
+  ${BN.losses.length ? `<div class="wrap"><table><tr><th>workload</th><th>comparison</th><th>time ratio</th></tr>
+    ${BN.losses.map((l) => `<tr><td>${esc(l.id)}</td><td>${esc(l.comparison)}</td><td class="n bad">${x2(1 / l.speedup)} slower</td></tr>`).join('')}</table></div>` : '<p>None beyond noise.</p>'}
+
+  <h3>What these results rest on</h3>
+  <p><b>One adapter</b> (${esc(BN.adapter.vendor)} ${esc(BN.adapter.architecture)}, integrated, memory shared with the CPU), one machine, one browser, one power mode.
+  Nothing here is claimed for discrete GPUs, other drivers or other browsers. <b>CI does not run the GPU:</b> it checks that both recordings came from
+  the sources checked in, recomputes semantic preservation and the pass sabotage, and checks every figure on this page against the recordings.</p>`;
   };
 
   // Milestone 3b: every figure from measurements.json's m3b section.
@@ -281,6 +516,8 @@ try {
   };
 
   let html = `
+  ${M4 ? m4Section(M4) : ''}
+
   ${M3B ? m3bSection(M3B) : ''}
 
   <h2>Milestone 3a: an MLP trained on the GPU, correctness pre-registered</h2>

@@ -1367,6 +1367,22 @@ F9. **A probe of mine overwrote milestone 2's out-of-bounds record** (2026-10-19
     byte-identical to the committed file. Hand probes now run in the report
     page, which saves nothing.
 
+F10. **The fuzzer found a bug in my fusion pass** (2026-10-19, the first
+    recording of `web/m4.html`, before any timing). 6 of its 5,318 runs could
+    not be compiled. They were corpus programs 129, 240 and 1737, forward
+    graphs, naive and tiled matmul. In each, a value fed both a matmul and
+    that matmul's own epilogue (for example `matmul(x, W) + x`). The pass took
+    the value into the group because every one of its consumers was in the
+    group. But a matmul reads its operands at arbitrary indices, so they must
+    be stored, and the code generator found no buffer for it. The semantic
+    check could not see this: the interpreter evaluates the body exactly. The
+    direct tests could not either: none of them reuses a matmul operand. Fixed:
+    a matmul epilogue's operands are never group members. A new test lowers
+    every corpus graph and fails on program 129 with the fix taken out. The
+    failing recording is kept as `golden/gpu-m4-run1.json`. Everything else
+    in it passed. The recording that counts was made again from the fixed
+    sources.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of

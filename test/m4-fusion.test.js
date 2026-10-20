@@ -98,6 +98,20 @@ test('lowering a graph with no fused nodes gives milestone 2\'s launches exactly
   }
 });
 
+test('every corpus graph lowers, and every epilogue reads its matmul operands from stored values (the bug run 1 found)', () => {
+  for (let i = 1; i <= 2000; i++) {
+    for (const c of corpusGraphs(i)) {
+      const f = fuse(c.graph, { keep: c.keep });
+      for (const n of fusedNodes(f).filter((x) => x.attrs.kind === 'epilogue')) {
+        const b = bodyOf(n);
+        const mm = b.nodes.find((x) => x.op === 'matmul');
+        assert.ok(mm.inputs.every((j) => b.nodes[j].op === 'input'), `program ${i} ${c.label}`);
+      }
+      for (const matmul of ['naive', 'tiled']) lowerFused(f.graph, { matmul });
+    }
+  }
+});
+
 test('every direct case fuses into exactly the kernel it is meant to test, and is judgeable', () => {
   const cases = fusedDirectCases();
   assert.ok(cases.length >= 90);

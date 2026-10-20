@@ -233,7 +233,7 @@ export async function runTeacherForcedM4(runner, spec, { sabotage, configs = spe
     try {
       fs = fusedStep(step, pass ? { passSabotage: sabotage } : { sabotage });
     } catch (error) {
-      runs.push({ name: g.name, steps: 0, fuseError: String(error.message ?? error), detail: [] });
+      runs.push({ name: g.name, steps: 0, errors: 0, passed: 0, unjudged: 0, judgedFailures: 0, worst: 0, fuseError: String(error.message ?? error), detail: [] });
       continue;
     }
     const batchAt = (t) => g.schedule[t].map((i) => syn[i]);

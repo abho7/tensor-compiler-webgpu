@@ -126,6 +126,9 @@ function grow(graph, sink, consumers, taken, keep, { patterns, recompute, maxOpe
       const rowTier = kind === 'rowwise' && !lastAxisReduce(graph, mNode) && mNode.op !== 'broadcast' && isRowShape(mNode.shape);
       for (const p of new Set(mNode.inputs)) {
         if (members.has(p)) continue;
+        // A matmul epilogue's own operands are read at arbitrary indices, so they
+        // must stay stored values, never members (found by the GPU fuzzer: run 1).
+        if (root !== null && nodes[root].inputs.includes(p)) continue;
         const pn = nodes[p];
         if (scalarConst(pn)) { changed = tryAdd([p]) || changed; continue; }
         if (pn.op === 'broadcast' && scalarConst(nodes[pn.inputs[0]])) { changed = tryAdd([p, pn.inputs[0]]) || changed; continue; }
@@ -152,7 +155,7 @@ function grow(graph, sink, consumers, taken, keep, { patterns, recompute, maxOpe
           continue;
         }
         if (pn.op === 'matmul' && patterns.includes('epilogue') && kind === 'elementwise' && root === null
-          && size(pn.shape) === n && !rowTier) {
+          && size(pn.shape) === n && !rowTier && !pn.inputs.some((i) => members.has(i))) {
           if (tryAdd([p])) { kind = 'epilogue'; root = p; changed = true; }
           continue;
         }

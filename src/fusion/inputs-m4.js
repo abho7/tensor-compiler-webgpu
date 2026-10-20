@@ -9,6 +9,6 @@ export function m4Inputs(root) {
   const discarded = readdirSync(new URL('golden/', root)).filter((f) => f.startsWith('gpu-m4-bench-discarded-')).sort().map((f) => json(`golden/${f}`));
   return {
     spec: json('golden/spec-m3b.json'), torch: json('golden/torch-m3b.json'), gpuM3b: optional('golden/gpu-m3b.json'),
-    gpuRecord: optional('golden/gpu-m4.json'), benchRecord: optional('golden/gpu-m4-bench.json'), discarded,
+    gpuRecord: optional('golden/gpu-m4.json'), gpuRun1: optional('golden/gpu-m4-run1.json'), benchRecord: optional('golden/gpu-m4-bench.json'), discarded,
   };
 }

@@ -13,6 +13,13 @@ import { buildForward, initParams } from '../m3b/model.js';
 import { buildStep3b, paramShapes } from '../m3b/step.js';
 import { adamInitialState } from '../m3b/adam.js';
 import { encodeBatch } from '../m3b/data.js';
+import { MAX_OPERANDS } from './fuse.js';
+import { STAT_MARGIN } from '../m3b/measure-m3b.js';
+import { ROW_WG } from './codegen-fused.js';
+import { WG, TILE, MM_WG } from '../gpu/codegen.js';
+import { REPS, WARMUP, TARGET_NS } from './bench.js';
+import { ROW_CAP, CEILING_BYTES } from './workloads.js';
+import { FUZZ_PROGRAMS_M4, SABOTAGE_FUZZ_PROGRAMS } from '../gpu/harness-m4.js';
 
 export const SEMANTIC_PROGRAMS = 2000;
 export const PASS_SABOTAGE_PROGRAMS = 500;
@@ -115,13 +122,28 @@ export function modelFusion(spec) {
   });
 }
 
-export function measureM4({ spec }) {
-  return { m4: { semantics: semantics(spec), passSabotage: passSabotage(spec), fusion: modelFusion(spec) } };
+export function measureM4({ spec, torch, gpuM3b, gpuRecord, gpuRun1, benchRecord, discarded = [] }) {
+  const passSab = passSabotage(spec);
+  return { m4: {
+    // The fixed numbers of amendments 30 to 36, from the code that uses them.
+    config: { maxOperands: MAX_OPERANDS, rowWorkgroup: ROW_WG, elementwiseWorkgroup: WG, tile: TILE, naiveMatmulWorkgroup: MM_WG,
+      reps: REPS, warmup: WARMUP, targetMsPerRep: TARGET_NS / 1e6, rowCap: ROW_CAP, ceilingBytes: CEILING_BYTES,
+      fuzzPrograms: FUZZ_PROGRAMS_M4, sabotageFuzzPrograms: SABOTAGE_FUZZ_PROGRAMS, semanticPrograms: SEMANTIC_PROGRAMS,
+      passSabotagePrograms: PASS_SABOTAGE_PROGRAMS, statMargin: STAT_MARGIN_M4, m3bStatMargin: STAT_MARGIN, thresholds: THRESHOLDS },
+    semantics: semantics(spec), passSabotage: passSab, fusion: modelFusion(spec),
+    gpu: gpuRecord ? summarizeGpuM4(gpuRecord, { torch, gpuM3b, passSab }) : null,
+    // The first recording, kept as it came out: the fuzzer found a bug in the pass (DESIGN.md F10).
+    gpuRun1: gpuRun1 ? { sourceHash: gpuRun1.sourceHash, errors: gpuRun1.fuzz.errors, runs: gpuRun1.fuzz.runs,
+      failures: gpuRun1.fuzz.failures.map((f) => ({ program: f.index, run: f.run, matmul: f.matmul, error: f.error ?? null })) } : null,
+    bench: benchRecord ? summarizeBench(benchRecord) : null,
+    discardedSessions: discarded.map((d) => ({ at: d.recorded?.at ?? null, after: d.discarded.after, start: d.discarded.start?.activeMode ?? null,
+      now: d.discarded.now?.activeMode ?? null, onAC: d.discarded.now?.onAC ?? null })),
+  } };
 }
 
 // ---- the GPU correctness record (golden/gpu-m4.json) ---------------------------------------
 
-import { tost } from '../train/equivalence.js';
+import { tost, ALPHA } from '../train/equivalence.js';
 
 export const STAT_MARGIN_M4 = 1e-5;
 
@@ -165,7 +187,7 @@ export function summarizeGpuM4(record, { torch, gpuM3b, passSab }) {
   const m3b = new Map((gpuM3b?.statistical ?? []).map((e) => [e.seed, e]));
   const st = r.statistical;
   const statistical = {
-    seeds: st.length, margin: STAT_MARGIN_M4,
+    seeds: st.length, margin: STAT_MARGIN_M4, alpha: ALPHA,
     fusedVsTorch64: tost(st.map((e) => e.valLoss - t64.get(e.seed)), STAT_MARGIN_M4),
     fusedVsUnfused: tost(st.map((e) => e.valLoss - m3b.get(e.seed).valLoss), STAT_MARGIN_M4),
     // For context: milestone 3b's unfused run under the new margin.
@@ -211,6 +233,11 @@ export function verdict(base, other) {
   return { speedup, verdict: v };
 }
 
+/** Amendment 35's thresholds, as registered. */
+export const THRESHOLDS = { p1Fraction: 0.5, p2Ceiling: 3, p3Neutral: 0.1, p3ReluK: 512, p4Speedup: 2, p4WideC: 64, p4WideR: 64, p4NarrowC: 7,
+  p4NarrowR: 65536, p5MinR: 256, p7Dominated: 0.8, p7Within: 1.25, p8Matvec: 2, p8Add: 0.2, p8Within: 2, p9Fraction: 0.5, p1MinN: 1048573, bigN: 4194301 };
+const TH = THRESHOLDS;
+
 const briefTiming = (v) => (v ? { median: v.gpuUs.median, min: v.gpuUs.min, max: v.gpuUs.max, wallMedian: v.wallUs.median, launches: v.launches, bytes: v.bytes, gbs: v.gbs } : null);
 
 export function summarizeBench(record) {
@@ -242,22 +269,22 @@ export function summarizeBench(record) {
 
   const P = {};
   {
-    const big = fam('chain-unary').filter((r) => r.params.n >= 1048573);
+    const big = fam('chain-unary').filter((r) => r.params.n >= TH.p1MinN);
     const sizes = [...new Set(big.map((r) => r.params.n))];
     const per = sizes.map((n) => {
       const rs = big.filter((r) => r.params.n === n).sort((a, b) => a.params.L - b.params.L);
       return { n, speedups: rs.map((r) => ({ L: r.params.L, speedup: r.fused.speedup, verdict: r.fused.verdict })),
         increases: rs.at(-1).fused.speedup > rs[0].fused.speedup, monotone: rs.every((r, i) => i === 0 || r.fused.speedup >= rs[i - 1].fused.speedup),
-        belowHalfL: rs.filter((r) => r.params.L >= 2 && r.fused.speedup < r.params.L / 2).map((r) => r.params.L) };
+        belowHalfL: rs.filter((r) => r.params.L >= 2 && r.fused.speedup < r.params.L * TH.p1Fraction).map((r) => r.params.L) };
     });
     const small = fam('chain-unary').filter((r) => r.params.n === 1000).sort((a, b) => a.params.L - b.params.L);
     P.P1 = { per, small: small.map((r) => ({ L: r.params.L, speedup: r.fused.speedup, verdict: r.fused.verdict })),
       held: per.every((p) => p.increases && p.belowHalfL.length === 0) };
   }
   {
-    const rs = fam('chain-binary').filter((r) => r.params.n === 4194301).sort((a, b) => a.params.L - b.params.L);
+    const rs = fam('chain-binary').filter((r) => r.params.n === TH.bigN).sort((a, b) => a.params.L - b.params.L);
     const at = (L) => rs.find((r) => r.params.L === L);
-    const over3 = rs.filter((r) => range(r).lo > 3).map((r) => r.params.L);
+    const over3 = rs.filter((r) => range(r).lo > TH.p2Ceiling).map((r) => r.params.L);
     const falls = at(4).fused.speedup < at(1).fused.speedup;
     P.P2 = { speedups: rs.map((r) => ({ L: r.params.L, speedup: r.fused.speedup, verdict: r.fused.verdict, launchesFused: r.variants.fused.launches })),
       over3BeyondNoise: over3, fallsFrom1To4: falls, held: over3.length === 0 && !falls };
@@ -265,8 +292,8 @@ export function summarizeBench(record) {
   {
     const rs = fam('matmul-epilogue');
     const gelu = rs.filter((r) => r.params.act === 'gelu');
-    const reluBigK = rs.filter((r) => r.params.act === 'relu' && r.params.K >= 512);
-    const neutral = (r) => r.fused.verdict === 'noise' || Math.abs(r.fused.speedup - 1) <= 0.1;
+    const reluBigK = rs.filter((r) => r.params.act === 'relu' && r.params.K >= TH.p3ReluK);
+    const neutral = (r) => r.fused.verdict === 'noise' || Math.abs(r.fused.speedup - 1) <= TH.p3Neutral;
     P.P3 = { gelu: gelu.map((r) => ({ id: r.id, speedup: r.fused.speedup, verdict: r.fused.verdict })),
       reluK512: reluBigK.map((r) => ({ id: r.id, speedup: r.fused.speedup, verdict: r.fused.verdict })),
       losses: rs.filter((r) => r.fused.verdict === 'loss').map((r) => ({ id: r.id, speedup: r.fused.speedup })),
@@ -275,23 +302,23 @@ export function summarizeBench(record) {
   }
   {
     const rs = [...fam('layernorm'), ...fam('softmax')];
-    const wide = rs.filter((r) => r.params.C >= 64 && r.params.R >= 64);
-    const narrow = rs.filter((r) => r.params.C <= 7 && r.params.R === 65536);
+    const wide = rs.filter((r) => r.params.C >= TH.p4WideC && r.params.R >= TH.p4WideR);
+    const narrow = rs.filter((r) => r.params.C <= TH.p4NarrowC && r.params.R === TH.p4NarrowR);
     P.P4 = { wide: wide.map((r) => ({ id: r.id, speedup: r.fused.speedup, verdict: r.fused.verdict })),
       narrow: narrow.map((r) => ({ id: r.id, speedup: r.fused.speedup, verdict: r.fused.verdict })),
-      wideAbove2: wide.filter((r) => r.fused.speedup > 2).length, wideCount: wide.length,
+      wideAbove2: wide.filter((r) => r.fused.speedup > TH.p4Speedup).length, wideCount: wide.length,
       narrowLoss: narrow.filter((r) => r.fused.verdict === 'loss').length, narrowWin: narrow.filter((r) => r.fused.verdict === 'win').length,
       losses: rs.filter((r) => r.fused.verdict === 'loss').map((r) => ({ id: r.id, speedup: r.fused.speedup })) };
     P.P4.winHeld = P.P4.wideAbove2 === P.P4.wideCount;
     // The loss prediction is falsified if fused still wins beyond noise at both C = 1 and C = 7.
     const winsAt = (C) => narrow.filter((r) => r.params.C === C).every((r) => r.fused.verdict === 'win');
-    P.P4.lossHeld = !(winsAt(1) && winsAt(7));
+    P.P4.lossHeld = !([...new Set(narrow.map((r) => r.params.C))].every(winsAt));
   }
   {
     const rs = rows.filter((r) => r.family === 'broadcast-recompute').sort((a, b) => a.params.R - b.params.R);
     const ratio = rs.map((r) => ({ R: r.params.R, recomputeOverFused: r.variants.recompute.median / r.variants.fused.median, verdict: r.recomputeVsFused.verdict,
       fused: r.fused, recompute: r.recompute }));
-    const big = ratio.filter((x) => x.R >= 256);
+    const big = ratio.filter((x) => x.R >= TH.p5MinR);
     P.P5 = { ratio, held: big.every((x) => x.verdict === 'loss') && big.every((x, i) => i === 0 || x.recomputeOverFused > big[i - 1].recomputeOverFused) };
   }
   {
@@ -305,7 +332,7 @@ export function summarizeBench(record) {
     P.P7 = { steps: rs.map((r) => {
       const s = r.matmulShare, bound = 1 / s;
       return { id: r.id, matmulShare: s, amdahlBound: bound, speedup: r.fused.speedup, verdict: r.fused.verdict,
-        exceedsBoundBeyondNoise: range(r).lo > bound, matmulDominated: s >= 0.8, within125: r.fused.speedup <= 1.25 };
+        exceedsBoundBeyondNoise: range(r).lo > bound, matmulDominated: s >= TH.p7Dominated, within125: r.fused.speedup <= TH.p7Within };
     }) };
     P.P7.held = P.P7.steps.every((x) => !x.exceedsBoundBeyondNoise && (!x.matmulDominated || x.within125));
   }
@@ -323,22 +350,22 @@ export function summarizeBench(record) {
         compilerOverHand: best.median / hand.median, compilerOverHandF32: best.median / handF32.median };
     });
     P.P8 = {
-      matvec: shapes, matvecHeld: shapes.every((s) => s.compilerOverHand >= 2),
+      matvec: shapes, matvecHeld: shapes.every((s) => s.compilerOverHand >= TH.p8Matvec),
       add: add.map((r) => ({ n: r.params.n, ...r.handVsUnfused, compilerOverHand: r.variants.unfused.median / r.variants.hand.median })),
-      addHeld: add.every((r) => r.handVsUnfused.verdict === 'noise' || Math.abs(r.variants.unfused.median / r.variants.hand.median - 1) <= 0.2),
+      addHeld: add.every((r) => r.handVsUnfused.verdict === 'noise' || Math.abs(r.variants.unfused.median / r.variants.hand.median - 1) <= TH.p8Add),
       swiglu: sw.map((r) => ({ n: r.params.n, fusedOverHand: r.variants.fused.median / r.variants.hand.median, unfusedOverHand: r.variants.unfused.median / r.variants.hand.median })),
       rmsnorm: rms.map((r) => ({ rows: r.params.rows, fusedOverHand: r.variants.fused.median / r.variants.hand.median, unfusedOverHand: r.variants.unfused.median / r.variants.hand.median })),
     };
-    const within2 = (xs) => xs.every((x) => x.fusedOverHand <= 2) && xs.every((x) => x.unfusedOverHand > 2);
+    const within2 = (xs) => xs.every((x) => x.fusedOverHand <= TH.p8Within) && xs.every((x) => x.unfusedOverHand > TH.p8Within);
     P.P8.swigluHeld = within2(P.P8.swiglu);
     P.P8.rmsnormHeld = within2(P.P8.rmsnorm);
     P.P8.held = P.P8.matvecHeld && P.P8.addHeld && P.P8.swigluHeld && P.P8.rmsnormHeld;
   }
   {
-    const rs = [...fam('chain-unary'), ...fam('chain-binary')].filter((r) => r.params.n === 4194301);
+    const rs = [...fam('chain-unary'), ...fam('chain-binary')].filter((r) => r.params.n === TH.bigN);
     const copy = ceiling.copy.gbs;
     P.P9 = { copyCeiling: copy, fused: rs.map((r) => ({ id: r.id, gbs: r.variants.fused.gbs, fractionOfCopy: r.variants.fused.gbs / copy })),
-      held: rs.every((r) => r.variants.fused.gbs >= copy / 2) };
+      held: rs.every((r) => r.variants.fused.gbs >= copy * TH.p9Fraction) };
   }
   // Every loss, wherever it fell.
   const losses = [];
@@ -357,5 +384,5 @@ export function summarizeBench(record) {
     power: { start: start?.activeMode ?? null, onAC: start?.onAC ?? null, acOverlay: start?.ActiveOverlayAcPowerScheme?.name ?? null,
       checks: record.power.checks.length, changed: record.power.checks.some((c) => c.activeMode !== start?.activeMode || c.onAC !== start?.onAC),
       recorded: record.recorded?.power?.activeMode ?? null },
-    counterSelfTest: record.counterSelfTest, ceiling, counts, fusedVerdicts, predictions: P, losses, rows };
+    llm: { commit: record.llmKernels.commit, sha256: record.llmKernels.sha256 }, counterSelfTest: record.counterSelfTest, ceiling, counts, fusedVerdicts, predictions: P, losses, rows };
 }
