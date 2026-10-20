@@ -10119,5 +10119,101 @@
     "maxScore": 13.42167482870859
    }
   }
+ },
+ "m4": {
+  "semantics": {
+   "corpus": {
+    "programs": 2000,
+    "graphs": 4000,
+    "withFused": 3628,
+    "identical": 4000,
+    "compared": 50520,
+    "fusedNodes": 9207,
+    "byPattern": {
+     "elementwise": 7646,
+     "log-softmax": 121,
+     "rowwise": 266,
+     "matmul-epilogue": 1099,
+     "softmax": 75
+    },
+    "failures": []
+   },
+   "model": [
+    {
+     "graph": "forward",
+     "identical": true,
+     "compared": 84,
+     "launchesBefore": 212,
+     "launchesAfter": 48,
+     "byPattern": {
+      "matmul-epilogue": 7,
+      "layernorm": 5,
+      "softmax": 2,
+      "log-softmax": 1,
+      "elementwise": 1
+     }
+    },
+    {
+     "graph": "step",
+     "identical": true,
+     "compared": 556,
+     "launchesBefore": 1308,
+     "launchesAfter": 450,
+     "byPattern": {
+      "matmul-epilogue": 24,
+      "elementwise": 196,
+      "rowwise": 5
+     }
+    }
+   ]
+  },
+  "passSabotage": {
+   "programs": 500,
+   "graphs": 1000,
+   "changed": 580,
+   "caught": 21,
+   "threw": 558,
+   "firstCatch": 17,
+   "model": [
+    {
+     "graph": "forward",
+     "threw": true,
+     "error": "fuse: node 157 used before it is built"
+    },
+    {
+     "graph": "step",
+     "threw": true,
+     "error": "fuse: node 597 used before it is built"
+    }
+   ]
+  },
+  "fusion": [
+   {
+    "graph": "forward",
+    "launchesBefore": 212,
+    "launchesAfter": 48,
+    "byPattern": {
+     "matmul-epilogue": 7,
+     "layernorm": 5,
+     "softmax": 2,
+     "log-softmax": 1,
+     "elementwise": 1
+    },
+    "epilogues": 7,
+    "epiloguesWithActivation": 2
+   },
+   {
+    "graph": "step",
+    "launchesBefore": 1308,
+    "launchesAfter": 450,
+    "byPattern": {
+     "matmul-epilogue": 24,
+     "elementwise": 196,
+     "rowwise": 5
+    },
+    "epilogues": 24,
+    "epiloguesWithActivation": 0
+   }
+  ]
  }
 }

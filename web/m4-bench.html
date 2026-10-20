@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M4 fusion timings</title>
+<style>
+  :root { --ink: #16171b; --dim: #5c6068; --bg: #fbfbfc; --good: #15803d; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e7e9ee; --dim: #9aa1ab; --bg: #131418; --good: #4ade80; --bad: #f87171; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 ui-monospace, Consolas, monospace; }
+  main { max-width: 64rem; margin: 0 auto; padding: 2rem 1rem; }
+  .dim { color: var(--dim); } .good { color: var(--good); } .bad { color: var(--bad); }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <h1>Milestone 4: fusion timings</h1>
+  <p class="dim">Times every workload of DESIGN.md amendment 34 (with revisions R5 and R6), unfused against fused,
+  per the protocol of amendment 32: GPU timestamps around one compute pass holding k runs of the program, 5 warm-ups
+  and 32 repetitions per variant in ABBA order, the power mode read before, between and after workloads, and the
+  device's object-creating calls counted inside the timed region. It refuses to run unless
+  <code>golden/gpu-m4.json</code> was recorded from the current sources and passed. <code>?only=family,family</code>
+  runs a subset and <code>?record=0</code> skips saving; a subset is never recorded.</p>
+  <p id="status">starting&hellip;</p>
+  <pre id="out"></pre>
+</main>
+<script type="module">
+import { Bench, summarize, creationViolations, REPS } from '../src/fusion/bench.js';
+import { workloads, buildVariants, ceilingPrograms, streamingReference, judgeOutputs, compareOutputs, toF16, f16ToNumber } from '../src/fusion/workloads.js';
+import { SOURCE as LLM_SOURCE, SHA256 as LLM_SHA } from '../src/fusion/llm-kernels.js';
+import { hashSources } from '../src/gpu/sources.js';
+import { M4_SOURCE_FILES, M4_BENCH_FILES } from '../src/gpu/sources-m4.js';
+
+const q = new URLSearchParams(location.search);
+const only = q.get('only')?.split(',') ?? null;
+const status = document.getElementById('status');
+const out = document.getElementById('out');
+const progress = (s) => { status.textContent = s; window.__progress = s; };
+const log = (s) => { out.textContent += s + '\n'; };
+const read = (files) => Promise.all(files.map((f) => fetch(`../${f}`, { cache: 'no-store' }).then((r) => {
+  if (!r.ok) throw new Error(`cannot read ${f}`);
+  return r.text();
+})));
+const power = async () => { try { const r = await fetch('/power', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; } };
+const samePower = (a, b) => a && b && a.activeMode === b.activeMode && a.onAC === b.onAC
+  && a.ActiveOverlayAcPowerScheme?.guid === b.ActiveOverlayAcPowerScheme?.guid;
+const nextFrame = () => new Promise((r) => setTimeout(r, 0));
+let result = null;
+
+try {
+  // Correctness gates the timing (amendment 32).
+  const correctnessHash = hashSources(await read(M4_SOURCE_FILES));
+  const benchHash = hashSources(await read([...M4_SOURCE_FILES, ...M4_BENCH_FILES]));
+  // ?gate=skip is for debugging the harness on a subset only: such a run is never recorded (revision R6).
+  const debug = q.get('gate') === 'skip' && only;
+  if (!debug) {
+    const rec = await fetch('../golden/gpu-m4.json', { cache: 'no-store' });
+    if (!rec.ok) throw new Error('golden/gpu-m4.json is missing: run web/m4.html first');
+    const m4 = await rec.json();
+    if (m4.sourceHash !== correctnessHash) throw new Error(`golden/gpu-m4.json was recorded from sources ${m4.sourceHash}, not the current ${correctnessHash}`);
+    if (!m4.direct.every((d) => d.pass)) throw new Error('golden/gpu-m4.json: a direct test failed');
+    if (m4.fuzz.errors || m4.fuzz.failures.length) throw new Error('golden/gpu-m4.json: the fuzzer recorded failures');
+  }
+
+  const bench = await Bench.create();
+  const adapter = bench.info();
+  const start = await power();
+  log(`adapter: ${adapter.vendor} ${adapter.architecture}; timestamps ${adapter.timestampQuery}; sources ${benchHash}`);
+  log(`power at start: ${start ? `${start.activeMode} (AC overlay ${start.ActiveOverlayAcPowerScheme?.name}), on AC ${start.onAC}` : 'unknown (no local server)'}`);
+  result = { milestone: '4-bench', sourceHash: benchHash, correctnessHash, adapter, llmKernels: { ...LLM_SOURCE, sha256: LLM_SHA },
+    protocol: { warmup: 5, reps: REPS, order: 'ABBA', targetMsPerRep: 2 }, power: { start, checks: [] }, discarded: null };
+  const checkPower = async (after) => {
+    const p = await power();
+    result.power.checks.push({ after, activeMode: p?.activeMode ?? null, onAC: p?.onAC ?? null });
+    if (start && !debug && (!samePower(start, p) || !p.onAC)) {
+      result.discarded = { after, start, now: p };
+      throw new Error(`power mode changed or the machine left AC after ${after}: session discarded`);
+    }
+  };
+  if (start && !start.onAC && !debug) throw new Error('not on AC power: amendment 32 requires AC');
+
+  // The counter tested by breaking it: a bind group made per repetition must be flagged.
+  {
+    const w = workloads().find((x) => x.id === 'chain-unary-L4-n1000');
+    const b = buildVariants(w);
+    const p = { unfused: bench.prepare(b.programs.unfused) };
+    const honest = await bench.time(p);
+    const leaky = await bench.time(p, { leak: true });
+    bench.destroy(p.unfused);
+    result.counterSelfTest = { honest: creationViolations(honest.created, REPS), leaky: creationViolations(leaky.created, REPS) };
+    log(`counter self-test: honest ${JSON.stringify(result.counterSelfTest.honest)}, leaky ${JSON.stringify(result.counterSelfTest.leaky)}`);
+    if (Object.keys(result.counterSelfTest.honest).length || !Object.keys(result.counterSelfTest.leaky).length) throw new Error('the object-creation counter failed its self-test');
+  }
+
+  // The bandwidth ceiling (amendment 33).
+  if (!only || only.includes('ceiling')) {
+    result.ceiling = [];
+    for (const c of ceilingPrograms()) {
+      const p = { [c.id]: bench.prepare(c.program) };
+      const t = await bench.time(p);
+      bench.destroy(p[c.id]);
+      const s = summarize(t.reps[c.id]);
+      const gbs = c.program.bytes / (s.gpuUs.median * 1e3);
+      result.ceiling.push({ id: c.id, mode: c.mode, width: c.width, groups: c.groups, bytes: c.program.bytes, k: t.k, ...s, gbs, created: creationViolations(t.created, REPS) });
+      log(`ceiling ${c.id}: ${gbs.toFixed(1)} GB/s (median ${s.gpuUs.median.toFixed(1)} us)`);
+      progress(`ceiling ${c.id}`);
+      await nextFrame();
+    }
+    await checkPower('ceiling');
+  }
+
+  result.workloads = [];
+  const list = workloads().filter((w) => !only || only.includes(w.family));
+  for (const [wi, w] of list.entries()) {
+    progress(`${w.id} (${wi + 1}/${list.length}): building`);
+    await nextFrame();
+    const b = buildVariants(w);
+    const entry = { id: w.id, family: w.family, params: w.params, variants: {} };
+    const prepared = {};
+    for (const [name, prog] of Object.entries(b.programs)) prepared[name] = bench.prepare(prog);
+    try {
+      // The gate: each variant once, its outputs judged before anything is timed.
+      progress(`${w.id} (${wi + 1}/${list.length}): checking`);
+      await nextFrame();
+      const outs = {};
+      for (const name of Object.keys(prepared)) if (name !== 'matmul-only') outs[name] = await bench.outputs(prepared[name]);
+      entry.gate = {};
+      if (w.judge === 'composed') {
+        const ref = streamingReference(b.graph, b.inputs, b.outputs);
+        for (const name of Object.keys(outs)) {
+          let r = ref;
+          const f16Inputs = b.programs[name].f16Inputs;
+          if (f16Inputs?.length) {
+            const inputs = { ...b.inputs };
+            for (const k of f16Inputs) inputs[k] = Float64Array.from(toF16(b.inputs[k]), f16ToNumber);
+            r = streamingReference(b.graph, inputs, b.outputs);
+          }
+          const j = judgeOutputs(r, b.outputs, outs[name]);
+          entry.gate[name] = { pass: j.pass, unjudged: j.unjudged, worst: j.worst, unjudgeable: j.unjudgeable, elements: j.elements, first: j.first };
+        }
+      } else {
+        // Revision R6: the model workloads' composed bound is vacuous (R3); the fused outputs
+        // are compared with the unfused ones, and the difference reported.
+        const c = compareOutputs(outs.fused, outs.unfused);
+        entry.gate.fusedVsUnfused = c;
+        entry.gate.fused = { pass: c.finite };
+        entry.gate.unfused = { pass: outs.unfused.every((x) => x.every(Number.isFinite)) };
+      }
+      const failed = Object.entries(entry.gate).filter(([k, g]) => g.pass === false).map(([k]) => k);
+      if (failed.length) {
+        entry.failedGate = failed;
+        log(`${w.id}: GATE FAILED for ${failed.join(', ')}: ${JSON.stringify(entry.gate)}; not timed`);
+        continue;
+      }
+      for (const p of Object.values(prepared)) bench.reset(p);
+      progress(`${w.id} (${wi + 1}/${list.length}): timing`);
+      await nextFrame();
+      const t = await bench.time(prepared);
+      entry.k = t.k;
+      entry.created = t.created;
+      entry.violations = creationViolations(t.created, REPS * Object.keys(prepared).length);
+      for (const [name, reps] of Object.entries(t.reps)) {
+        const s = summarize(reps);
+        const prog = b.programs[name];
+        entry.variants[name] = { ...s, launches: prog.launches, bytes: prog.bytes, gbs: prog.bytes / (s.gpuUs.median * 1e3),
+          fusedNodes: prog.fusedNodes ?? null, reps: reps.map((r) => r.gpuNs) };
+      }
+      const v = entry.variants;
+      const fmt = (name) => `${name} ${v[name].gpuUs.median.toFixed(2)}us [${v[name].gpuUs.min.toFixed(2)}, ${v[name].gpuUs.max.toFixed(2)}] ${v[name].launches}L ${v[name].gbs.toFixed(1)}GB/s`;
+      log(`${w.id}: k=${t.k} ${Object.keys(v).map(fmt).join(' | ')}${Object.keys(entry.violations).length ? ` VIOLATIONS ${JSON.stringify(entry.violations)}` : ''}`);
+    } finally {
+      for (const p of Object.values(prepared)) bench.destroy(p);
+      result.workloads.push(entry);
+    }
+    await checkPower(w.id);
+  }
+
+  result.power.end = await power();
+  if (bench.lost) throw new Error(`device lost: ${bench.lost.message}`);
+  window.__result = result;
+  if (q.get('record') !== '0' && !only) {
+    const saved = await (await fetch('/record/gpu-m4-bench.json', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) })).json();
+    log(`recorded: ${saved.saved}, power mode: ${saved.power?.activeMode} (on AC: ${saved.power?.onAC})`);
+  }
+  progress('done');
+  status.className = 'good';
+} catch (error) {
+  window.__error = String(error.stack ?? error);
+  status.textContent = `error: ${error.message ?? error}`;
+  status.className = 'bad';
+  // A discarded session is logged, not reported as a result (amendment 32).
+  if (result?.discarded && q.get('record') !== '0' && !only) {
+    await fetch(`/record/gpu-m4-bench-discarded-${Date.now()}.json`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) }).catch(() => {});
+  }
+}
+window.__done = true;
+</script>

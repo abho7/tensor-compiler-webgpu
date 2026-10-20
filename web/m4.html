@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M4 GPU checks</title>
+<style>
+  :root { --ink: #16171b; --dim: #5c6068; --bg: #fbfbfc; --good: #15803d; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e7e9ee; --dim: #9aa1ab; --bg: #131418; --good: #4ade80; --bad: #f87171; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 ui-monospace, Consolas, monospace; }
+  main { max-width: 56rem; margin: 0 auto; padding: 2rem 1rem; }
+  .dim { color: var(--dim); } .good { color: var(--good); } .bad { color: var(--bad); }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <h1>Milestone 4 GPU checks</h1>
+  <p class="dim">Fused kernels against the float64 interpreter, before anything is timed: direct adversarial
+  tests of every fused kernel kind, the differential fuzzer (unfused and fused on the GPU), the fused training
+  step node-local over every step of the four golden runs, the fused trainer against the checked path, 24 seeds
+  trained with the fused step, and each injected bug. Pre-registered in DESIGN.md amendments 29 to 38. Nothing is
+  timed. <code>?record=0</code> skips saving; <code>?parts=direct,fuzz,tf,consistency,stat,sabotage</code> runs a
+  subset (a subset is never recorded); <code>?programs=N</code> shortens the fuzzer (never recorded).</p>
+  <p id="status">starting&hellip;</p>
+  <pre id="out"></pre>
+</main>
+<script type="module">
+import { GpuRunner } from '../src/gpu/runtime.js';
+import { runDirectM4, runFuzzM4, runTeacherForcedM4, runForwardLocalM4, runConsistencyM4, runStatisticalM4, runSabotageM4, FUZZ_PROGRAMS_M4 } from '../src/gpu/harness-m4.js';
+import { hashSources } from '../src/gpu/sources.js';
+import { M4_SOURCE_FILES } from '../src/gpu/sources-m4.js';
+
+const ALL = ['direct', 'fuzz', 'tf', 'consistency', 'stat', 'sabotage'];
+const q = new URLSearchParams(location.search);
+const parts = q.get('parts') ? q.get('parts').split(',') : ALL;
+const programs = Number(q.get('programs') ?? FUZZ_PROGRAMS_M4);
+const status = document.getElementById('status');
+const out = document.getElementById('out');
+const progress = (s) => { status.textContent = s; window.__progress = s; };
+const log = (s) => { out.textContent += s + '\n'; };
+
+try {
+  const texts = await Promise.all(M4_SOURCE_FILES.map((f) => fetch(`../${f}`, { cache: 'no-store' }).then((r) => {
+    if (!r.ok) throw new Error(`cannot read ${f}`);
+    return r.text();
+  })));
+  const sourceHash = hashSources(texts);
+  const spec = await (await fetch('../golden/spec-m3b.json', { cache: 'no-store' })).json();
+  const runner = await GpuRunner.create();
+  const adapter = runner.info();
+  log(`adapter: ${adapter.vendor} ${adapter.architecture} ${adapter.description}`);
+  log(`sources: ${sourceHash}; parts: ${parts.join(',')}`);
+  const result = { milestone: '4', sourceHash, adapter };
+
+  let honestDirect = null;
+  if (parts.includes('direct') || parts.includes('sabotage')) {
+    honestDirect = await runDirectM4(runner, { progress });
+    if (parts.includes('direct')) result.direct = honestDirect;
+    const bad = honestDirect.filter((d) => !d.pass);
+    log(`direct: ${honestDirect.length - bad.length}/${honestDirect.length} pass`);
+    for (const d of bad) log(`  FAIL ${d.name}: ${d.status} intended=${d.intended} worst=${d.worst} canary=${d.canaryOk} ${d.error ?? ''} ${JSON.stringify(d.first)}`);
+  }
+  if (parts.includes('fuzz')) {
+    result.fuzz = await runFuzzM4(runner, { programs, progress });
+    const f = result.fuzz;
+    log(`fuzz: ${f.programs} programs, ${f.skipped} skipped, ${f.runs} runs (${f.fusedRuns} with a fused node): unfused ${f.unfusedPassed} pass, fused ${f.fusedPassed} pass, ${f.errors} errors, bitwise same ${f.bitwiseSame}; worst fused ${f.worstFused}, unfused ${f.worstUnfused}`);
+    log(`  kinds ${JSON.stringify(f.byKind)} patterns ${JSON.stringify(f.byPattern)}`);
+    for (const x of f.failures.slice(0, 20)) log(`  failure ${JSON.stringify(x)}`);
+  }
+  if (parts.includes('tf')) {
+    result.teacherForced = await runTeacherForcedM4(runner, spec, { progress });
+    result.forwardLocal = await runForwardLocalM4(runner, spec, { progress });
+    for (const r of result.forwardLocal) log(`fused forward node-local ${r.name}: ${r.pass ? 'pass' : 'FAIL'}, worst ${r.worst}, patterns ${r.patterns?.join(',')}, launches ${r.launches} (unfused ${r.unfusedLaunches}) ${r.error ?? ''}`);
+    for (const r of result.teacherForced) log(`fused teacher-forced ${r.name}: ${r.passed}/${r.steps} pass, ${r.unjudged} unjudged, ${r.judgedFailures} judged failures, worst ${r.worst}, ${r.errors} errors; launches ${r.launches} (unfused ${r.unfusedLaunches})`);
+  }
+  if (parts.includes('consistency')) {
+    result.consistency = await runConsistencyM4(runner, spec);
+    log(`fused trainer vs checked path: ${result.consistency.identical ? 'identical' : 'DIFFERENT'} over ${result.consistency.steps} steps`);
+  }
+  if (parts.includes('stat')) {
+    result.statistical = await runStatisticalM4(runner, spec, { progress });
+    log(`statistical (fused): ${result.statistical.length} runs`);
+  }
+  if (parts.includes('sabotage')) {
+    result.sabotage = await runSabotageM4(runner, spec, honestDirect, { progress });
+    for (const s of result.sabotage) {
+      const fz = s.fuzz;
+      log(`sabotage ${s.name}: direct ${s.direct.caught}/${s.direct.cases} (threw ${s.direct.fuseErrors}), fuzz general ${fz.general.caught}/${fz.general.containing} targeted ${fz.targeted.caught}/${fz.targeted.containing} (threw ${fz.fuseErrors}), node-local step ${s.teacherForced.caught}/${s.teacherForced.trials}${s.teacherForced.fuseError ? ' (pass threw)' : ''}, forward ${s.forward.caught}/${s.forward.trials} (threw ${s.forward.fuseErrors})`);
+    }
+  }
+
+  if (runner.lost) throw new Error(`device lost during the run: ${runner.lost.message}`);
+  window.__result = result;
+  if (q.get('record') !== '0' && ALL.every((p) => parts.includes(p)) && programs === FUZZ_PROGRAMS_M4) {
+    const saved = await (await fetch('/record/gpu-m4.json', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) })).json();
+    log(`recorded: ${saved.saved}, power mode: ${saved.power?.activeMode} (on AC: ${saved.power?.onAC})`);
+  }
+  progress('done');
+  status.className = 'good';
+} catch (error) {
+  window.__error = String(error.stack ?? error);
+  status.textContent = `error: ${error.message ?? error}`;
+  status.className = 'bad';
+}
+window.__done = true;
+</script>

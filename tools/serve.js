@@ -78,6 +78,12 @@ const server = createServer((req, res) => {
     record(req, res, m[1]);
     return;
   }
+  // The power mode on its own, so a benchmark page can check it between
+  // workloads and discard a session in which it changed (DESIGN.md amendment 32).
+  if (url.pathname === '/power') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(powerMode()));
+    return;
+  }
   const requested = decodeURIComponent(url.pathname);
   const relative = normalize(requested).replace(/^([/\\])+/, '');
   let path = join(ROOT, relative);

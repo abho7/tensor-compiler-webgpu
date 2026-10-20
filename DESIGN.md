@@ -1351,6 +1351,22 @@ R6. **Two parts of amendments 32 and 34 could not be done as written, and are
       change. A session discarded for power is kept in its own file and
       reported as discarded.
 
+F9. **A probe of mine overwrote milestone 2's out-of-bounds record** (2026-10-19).
+    To read this adapter's limits, and later to try harness functions by hand,
+    I opened `web/oob.html` in the debugging browser as a convenient page to
+    run scripts in. I had not checked that it runs its probe on load and saves
+    `golden/gpu-oob.json`. It was opened three times. `git status` showed the
+    change before anything was committed. The file was restored from git, and
+    its SHA-256 matches the committed one
+    (`a5c855a1b422331f9351af0710e50ac341967b6e88d15fa650c5626e99df841d`).
+    `golden/measurements.json` was regenerated from the restored file
+    and compared with the copy made while the overwritten file was in place.
+    The overwritten record had carried new adapter metadata into it (a longer
+    feature list, a newer browser version, a new recording time) but no
+    different probe result. Regenerated, every figure of milestones 1 to 3b is
+    byte-identical to the committed file. Hand probes now run in the report
+    page, which saves nothing.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of
