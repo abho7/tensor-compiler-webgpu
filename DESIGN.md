@@ -1299,6 +1299,58 @@ more specific, this governs.
     recomputes everything that needs no GPU (semantic preservation included),
     and checks the report's figures against the recordings.
 
+### Milestone 4 revisions, before any timing
+
+R5. **The training step contains none of the full LayerNorm, softmax or
+    GELU-epilogue patterns** (2026-10-19, the first fusion of the step, before
+    any kernel was timed). Autodiff's backward pass reads values from inside
+    the forward patterns: each LayerNorm's centred input and its standard
+    deviation, each attention softmax's `exp`, and the GELU's input. So those
+    values must be stored, and every group stops at them. The fused step
+    keeps matmul epilogues that add a bias, or a bias and a residual, but none
+    that applies an activation. It has row-wise kernels for parts of the
+    softmax (the shift and the `exp`, or the normalisation), and none labelled
+    `layernorm`, `softmax` or `log-softmax`. The figures are in `m4.fusion` of
+    `golden/measurements.json`. Consequence: amendment 31's prediction that
+    the node-local training step would catch bugs 1 and 2 cannot come true,
+    because neither bug has a target there. That prediction stays as
+    registered, and is reported as failed. Added, before any timing: the fused
+    **forward pass** (logits and loss from parameters, as in inference), which
+    does contain all three patterns. It is (a) a node-local check like R3's on
+    the four golden configs at initialisation, run for every sabotage after the
+    registered checks, and (b) a timed workload, synthetic `V = 16, B = 8` and
+    text `V = 75, B = 16`.
+    Also found and fixed before any timing, in my pass: default fusion took the
+    producer behind a broadcast into the group. That is the recomputation that
+    only the `recompute` option should do (amendment 30). Semantics were
+    unaffected, since the interpreter evaluates bodies exactly, so only a
+    structural test could see it, and one now does.
+
+R6. **Two parts of amendments 32 and 34 could not be done as written, and are
+    changed before any timing.**
+    - The row workloads' cap of 2^26 elements. Unfused, a LayerNorm holds
+      about 18 tensors of its input's size. At 2^26 float32 elements that is
+      about 4.6 GB, on a machine whose GPU shares 16 GB of system memory with
+      everything else. Before: 2^26. After: 2^22, so `R·C ≤ 4,194,304`.
+    - The gate "checks their outputs against the float64 interpreter within
+      amendment 8's budget". For the model workloads (forward pass and
+      training step) that budget is vacuous (R3: the logits have no finite
+      bound), so every output would be unjudged. Before: the composed budget
+      for every workload. After: the composed budget for every workload except
+      those. For those, the gate is the node-local check recorded in
+      `golden/gpu-m4.json`, and in the session the fused and unfused outputs
+      are compared, and their largest difference is reported, with no
+      tolerance. The composed budget is computed one node at a time, with only
+      live values held, which gives the same numbers as `referenceWithBounds`
+      (a test checks this). For the hand-written kernels it uses their f16
+      weights and gains rounded as the kernels store them.
+    - Which session is the result. Short runs of the benchmark page on subsets
+      of workloads (`?only=`) were and will be made to debug the harness. They
+      are not recorded and not reported. The result is the first complete
+      session recorded from the final sources in which the power mode did not
+      change. A session discarded for power is kept in its own file and
+      reported as discarded.
+
 ## Fusion (milestone 4, criteria fixed in advance)
 
 The hypothesis to test, not a conclusion: fusion saves the memory round trip of
