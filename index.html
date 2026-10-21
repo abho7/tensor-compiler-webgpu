@@ -165,6 +165,7 @@ try {
     const MB = 1e6;
     const chartW = 640, chartH = 240, padL = 52, padR = 12, padT = 12, padB = 34;
     const colors = ['var(--accent)', 'var(--good)', 'var(--warn)', 'var(--bad)'];
+    const fs = 11, tick = 16, dot = 2.5, headroom = 1.08, label = 6, labelUp = 4;
     // layout-end
     const cfg = X.config, TH = cfg.thresholds, sem = X.semantics, GP = X.gpu, BN = X.bench;
     const ok = (b) => (b ? 'good' : 'bad');
@@ -191,7 +192,7 @@ try {
       <td>bitwise identical float64 values at every surviving node; ${n(corpusSem.withFused)} of the corpus graphs contain at least one fused node (${n(corpusSem.fusedNodes)} in all)</td></tr>
     <tr><td>Direct adversarial tests of every fused kernel kind</td>
       <td class="n ${ok(GP.direct.passed === GP.direct.cases)}">${GP.direct.passed} of ${GP.direct.cases}</td>
-      <td>amendment 8's budget composed over the small graph, canary-padded buffers; ${Object.entries(GP.direct.byPattern).map(([k, v]) => `${esc(k)} ${v.passed}/${v.cases}`).join(', ')}; worst ${sci(GP.direct.worst)} of the budget</td></tr>
+      <td>the float32 budget composed over the small graph, canary-padded buffers; ${Object.entries(GP.direct.byPattern).map(([k, v]) => `${esc(k)} ${v.passed}/${v.cases}`).join(', ')}; worst ${sci(GP.direct.worst)} of the budget</td></tr>
     <tr><td>Differential fuzzer: unfused and fused on the GPU, both against the interpreter</td>
       <td class="n ${ok(GP.fuzz.fusedPassed === GP.fuzz.runs && !GP.fuzz.errors)}">fused ${n(GP.fuzz.fusedPassed)} of ${n(GP.fuzz.runs)} runs; unfused ${n(GP.fuzz.unfusedPassed)}</td>
       <td>${n(GP.fuzz.programs)} corpus programs, forward and gradient, naive and tiled matmul; ${n(GP.fuzz.fusedRuns)} runs had a fused node; worst ${sci(GP.fuzz.worstFused)} of the budget (unfused ${sci(GP.fuzz.worstUnfused)}); fused and unfused GPU values bitwise identical in ${n(GP.fuzz.bitwiseSame)} runs${R1 ? `. <b class="warn">The first recording failed here:</b> ${R1.errors} runs (programs ${[...new Set(R1.failures.map((f) => f.program))].join(', ')}) could not be compiled, a bug in my pass that this fuzzer found (DESIGN.md F10)` : ''}</td></tr>
@@ -226,7 +227,7 @@ try {
       return `<td class="n ${x.caught ? '' : 'note'}">${x.caught} / ${n(x.trials)}${x.threw ? ` <span class="warn">(threw ${n(x.threw)})</span>` : ''}</td>`;
     }).join('')}<td>${b.caughtFirstBy ? checkName4[b.caughtFirstBy] : '<span class="bad">nothing</span>'}</td></tr>`).join('')}
   </table></div>
-  <p>Predicted before anything ran (amendment 31): the semantic check catches only the bug in the pass; the direct tests catch the four kernel bugs;
+  <p>Predicted before anything ran: the semantic check catches only the bug in the pass; the direct tests catch the four kernel bugs;
   the fuzzer cannot see the LayerNorm or the bounds bug; the node-local training step catches the epilogue and LayerNorm bugs. ${(() => {
     const missed = GP.sabotage.flatMap((b) => Object.entries(b.asPredicted).filter(([, v]) => !v).map(([k]) => `${bugName4[b.name]} (${checkName4[k]})`));
     return missed.length ? `<b class="bad">Not as predicted:</b> ${missed.join('; ')}. The training step has no fused LayerNorm and no epilogue with an activation for these bugs to touch, because autodiff stores those patterns' insides for the backward pass (revision R5); the forward pass, which has them, caught both.` : 'Every prediction held.';
@@ -241,14 +242,14 @@ try {
       const unary = fam('chain-unary');
       const sizes = [...new Set(unary.map((r) => r.params.n))];
       const Ls = [...new Set(unary.map((r) => r.params.L))];
-      const ymax = Math.max(...unary.map((r) => r.fused.speedup)) * 1.08;
+      const ymax = Math.max(...unary.map((r) => r.fused.speedup)) * headroom;
       const xp = (i) => padL + (i / (Ls.length - 1)) * (chartW - padL - padR), yp = (v) => padT + (1 - v / ymax) * (chartH - padT - padB);
       return `<svg viewBox="0 0 ${chartW} ${chartH}" role="img" aria-label="Fusion speedup against chain length" style="width:100%;height:auto">
         <line x1="${padL}" y1="${chartH - padB}" x2="${chartW - padR}" y2="${chartH - padB}" stroke="var(--line)"/><line x1="${padL}" y1="${padT}" x2="${padL}" y2="${chartH - padB}" stroke="var(--line)"/>
         <line x1="${padL}" y1="${yp(1)}" x2="${chartW - padR}" y2="${yp(1)}" stroke="var(--faint)" stroke-dasharray="4 4"/>
-        <text x="${padL - 6}" y="${yp(1) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">1&times;</text>
-        <text x="${padL - 6}" y="${yp(ymax) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">${ymax.toFixed(1)}&times;</text>
-        ${Ls.map((L, i) => `<text x="${xp(i)}" y="${chartH - padB + 16}" text-anchor="middle" fill="var(--faint)" font-size="11">L ${L}</text>`).join('')}
+        <text x="${padL - label}" y="${yp(1) + labelUp}" text-anchor="end" fill="var(--faint)" font-size="${fs}">1&times;</text>
+        <text x="${padL - label}" y="${yp(ymax) + labelUp}" text-anchor="end" fill="var(--faint)" font-size="${fs}">${ymax.toFixed(1)}&times;</text>
+        ${Ls.map((L, i) => `<text x="${xp(i)}" y="${chartH - padB + tick}" text-anchor="middle" fill="var(--faint)" font-size="${fs}">L ${L}</text>`).join('')}
         ${sizes.map((s, k) => `<polyline fill="none" stroke="${colors[k % colors.length]}" stroke-width="2" points="${Ls.map((L, i) => `${xp(i).toFixed(1)},${yp(unary.find((r) => r.params.n === s && r.params.L === L).fused.speedup).toFixed(1)}`).join(' ')}"/>`).join('')}
       </svg><p class="note">Fused over unfused median time for a unary chain of length L. ${sizes.map((s, k) => `<span style="color:${colors[k % colors.length]}">n = ${n(s)}</span>`).join(', ')}.</p>`;
     })();
@@ -257,18 +258,18 @@ try {
     const bwChart = (() => {
       const pts = rows.filter((r) => !r.failedGate).flatMap((r) => Object.entries(r.variants).filter(([k, v]) => v && v.bytes && k !== 'matmul-only').map(([k, v]) => ({ k, bytes: v.bytes, gbs: v.gbs, id: r.id })));
       const lx = pts.map((p) => Math.log10(p.bytes)), x0 = Math.floor(Math.min(...lx)), x1 = Math.ceil(Math.max(...lx));
-      const ymax = Math.max(BN.ceiling.read.gbs, BN.ceiling.copy.gbs, ...pts.map((p) => p.gbs)) * 1.08;
+      const ymax = Math.max(BN.ceiling.read.gbs, BN.ceiling.copy.gbs, ...pts.map((p) => p.gbs)) * headroom;
       const xp = (b) => padL + ((Math.log10(b) - x0) / (x1 - x0)) * (chartW - padL - padR), yp = (v) => padT + (1 - v / ymax) * (chartH - padT - padB);
       const col = (k) => (k === 'fused' || k === 'recompute' ? 'var(--accent)' : k === 'unfused' ? 'var(--faint)' : 'var(--warn)');
       return `<svg viewBox="0 0 ${chartW} ${chartH}" role="img" aria-label="Achieved bandwidth against bytes moved" style="width:100%;height:auto">
         <line x1="${padL}" y1="${chartH - padB}" x2="${chartW - padR}" y2="${chartH - padB}" stroke="var(--line)"/><line x1="${padL}" y1="${padT}" x2="${padL}" y2="${chartH - padB}" stroke="var(--line)"/>
         ${[['read', BN.ceiling.read.gbs], ['copy', BN.ceiling.copy.gbs]].map(([k, v]) => `<line x1="${padL}" y1="${yp(v)}" x2="${chartW - padR}" y2="${yp(v)}" stroke="var(--bad)" stroke-dasharray="4 4"/>
-          <text x="${chartW - padR}" y="${yp(v) - 4}" text-anchor="end" fill="var(--bad)" font-size="11">${k} ceiling ${v.toFixed(1)} GB/s</text>`).join('')}
-        <text x="${padL - 6}" y="${yp(0) + 4}" text-anchor="end" fill="var(--faint)" font-size="11">0</text>
-        <text x="${padL}" y="${chartH - padB + 16}" fill="var(--faint)" font-size="11">${sci(10 ** x0 / MB)} MB</text>
-        <text x="${chartW - padR}" y="${chartH - padB + 16}" text-anchor="end" fill="var(--faint)" font-size="11">${sci(10 ** x1 / MB)} MB moved (log)</text>
-        ${pts.map((p) => `<circle cx="${xp(p.bytes).toFixed(1)}" cy="${yp(p.gbs).toFixed(1)}" r="2.5" fill="${col(p.k)}"><title>${esc(p.id)} ${esc(p.k)}: ${p.gbs.toFixed(1)} GB/s</title></circle>`).join('')}
-      </svg><p class="note">Every timed variant: bytes it must move (each operand read once, plus its output; amendment 33) over its median time.
+          <text x="${chartW - padR}" y="${yp(v) - labelUp}" text-anchor="end" fill="var(--bad)" font-size="${fs}">${k} ceiling ${v.toFixed(1)} GB/s</text>`).join('')}
+        <text x="${padL - label}" y="${yp(0) + labelUp}" text-anchor="end" fill="var(--faint)" font-size="${fs}">0</text>
+        <text x="${padL}" y="${chartH - padB + tick}" fill="var(--faint)" font-size="${fs}">${sci(10 ** x0 / MB)} MB</text>
+        <text x="${chartW - padR}" y="${chartH - padB + tick}" text-anchor="end" fill="var(--faint)" font-size="${fs}">${sci(10 ** x1 / MB)} MB moved (log)</text>
+        ${pts.map((p) => `<circle cx="${xp(p.bytes).toFixed(1)}" cy="${yp(p.gbs).toFixed(1)}" r="${dot}" fill="${col(p.k)}"><title>${esc(p.id)} ${esc(p.k)}: ${p.gbs.toFixed(1)} GB/s</title></circle>`).join('')}
+      </svg><p class="note">Every timed variant: bytes it must move (each operand read once, plus its output) over its median time.
       Blue fused, grey unfused, amber hand-written. Dashed: the ceilings measured in the same session. Hover a point for its workload.</p>`;
     })();
 
@@ -292,7 +293,7 @@ try {
       ['P5', `Recomputing a ${n(get('broadcast-recompute-R16').params.ops)}-op producer across a broadcast loses to storing it once for R &ge; ${TH.p5MinR}, more so as R grows`,
         P.P5.ratio.map((x) => `R ${n(x.R)}: recompute ${x2(x.recomputeOverFused)} the time of default fusion (${x.verdict})`).join(', '), P.P5.held],
       ['P6', `Copying a producer into its ${get('lost-reuse-1op').params.consumers} consumers loses when it is ${get('lost-reuse-16op').params.ops} ops, not when it is ${get('lost-reuse-1op').params.ops}`,
-        `1 op: recompute against stored ${x2(P.P6.op1.recomputeVsFused.speedup)} (${P.P6.op1.recomputeVsFused.verdict}); 16 ops: ${x2(P.P6.op16.recomputeVsFused.speedup)} (${P.P6.op16.recomputeVsFused.verdict})`, P.P6.held],
+        `${get('lost-reuse-1op').params.ops} op: recompute against stored ${x2(P.P6.op1.recomputeVsFused.speedup)} (${P.P6.op1.recomputeVsFused.verdict}); ${get('lost-reuse-16op').params.ops} ops: ${x2(P.P6.op16.recomputeVsFused.speedup)} (${P.P6.op16.recomputeVsFused.verdict})`, P.P6.held],
       ['P7', `The training step's speedup is at most Amdahl's 1/s, where s is the matmul share; within ${TH.p7Within} if s &ge; ${TH.p7Dominated}`,
         P.P7.steps.map((s) => `${esc(s.id)}: s = ${s.matmulShare.toFixed(2)}, bound ${x2(s.amdahlBound)}, measured ${x2(s.speedup)}`).join('<br>'), P.P7.held],
       ['P8', `Against hand-written kernels: the compiler loses by &ge; ${TH.p8Matvec}&times; at matrix-vector shapes; matches ADD within ${100 * TH.p8Add}% or noise; fused SwiGLU and RMSNorm within ${TH.p8Within}&times;, unfused not`,
@@ -311,7 +312,7 @@ try {
   <p>A fusion pass, IR to IR, replaces groups of nodes with one fused node whose body is an ordinary graph: elementwise chains,
   a matmul with its epilogue, and row-wise LayerNorm, softmax and log-softmax. The interpreter evaluates a fused node by evaluating
   its body, so whether fusion preserves meaning is a pure-JavaScript check, run by CI. Everything was pre-registered in DESIGN.md
-  (amendments 29 to 38) before any fusion code existed. Two revisions (R5, R6) were logged before any kernel was timed. Attention
+  (its milestone 4 preconditions) before any fusion code existed. Two revisions (R5, R6) were logged before any kernel was timed. Attention
   fusion, the stretch goal, was not attempted.</p>
   <div class="card lead"><p style="margin:0"><b>Answer, for this adapter only:</b> fused beat unfused beyond noise in
   ${BN.fusedVerdicts.win} of ${BN.fusedVerdicts.win + BN.fusedVerdicts.loss + BN.fusedVerdicts.noise} timed workloads, lost in ${BN.fusedVerdicts.loss},
