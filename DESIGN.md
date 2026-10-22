@@ -576,7 +576,8 @@ before and after.
 
 19. **Milestone 2's record under the new op.** Adding `sqrt` edits files inside
     milestone 2's source hash, so the check that the M2 recording came from the
-    checked-in sources is pinned to commit `8f45285`, where it was recorded: CI
+    checked-in sources is pinned to commit `c261763` (`8f45285` before the
+    2026-10-21 history rewrite), where it was recorded: CI
     reads those files from git history and hashes them. M2's kernel snapshot
     and kernel list are frozen as they were; new kernels get their own
     snapshot. The M2 harness is then run again on the extended compiler, into

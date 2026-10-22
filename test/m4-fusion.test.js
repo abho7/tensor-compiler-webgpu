@@ -221,7 +221,7 @@ test('the sweep is what amendment 34 and revisions R5 and R6 list', () => {
 test('the hand-written kernels are llm-inference-webgpu\'s, unedited (amendment 37)', () => {
   const sha = (s) => createHash('sha256').update(s).digest('hex');
   for (const name of ['ADD', 'SWIGLU', 'RMSNORM', 'MATVEC']) assert.equal(sha(llm[name]), llm.SHA256[name], name);
-  assert.equal(llm.SOURCE.commit, '22e2d5b');
+  assert.equal(llm.SOURCE.commit, '6c2431a');
   // The matvec workloads build an f16 copy and an f32 copy of the same weights.
   const w = workloads().find((x) => x.id === 'baseline-matvec-896x896-naive');
   const b = buildVariants(w);

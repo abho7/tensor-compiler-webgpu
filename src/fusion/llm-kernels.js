@@ -1,9 +1,9 @@
 // Four hand-written WGSL kernels from llm-inference-webgpu (src/gpu/kernels.js at
-// commit 22e2d5b), copied verbatim by tools/vendor-llm-kernels.js as baselines for
+// commit 6c2431a), copied verbatim by tools/vendor-llm-kernels.js as baselines for
 // milestone 4 (DESIGN.md amendment 37). Not edited: test/m4-bench.test.js checks
 // each text against the SHA-256 recorded here. GROUP is that file's workgroup size.
 
-export const SOURCE = { repository: 'llm-inference-webgpu', file: 'src/gpu/kernels.js', commit: '22e2d5b' };
+export const SOURCE = { repository: 'llm-inference-webgpu', file: 'src/gpu/kernels.js', commit: '6c2431a' };
 export const GROUP = 256;
 
 export const ADD = "\nstruct Params { n: u32, pad0: u32, pad1: u32, pad2: u32 };\n\n@group(0) @binding(0) var<storage, read_write> x      : array<f32>;\n@group(0) @binding(1) var<storage, read>       delta  : array<f32>;\n@group(0) @binding(2) var<uniform>             params : Params;\n\n@compute @workgroup_size(256)\nfn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n  let i = gid.x;\n  if (i >= params.n) { return; }\n  x[i] = x[i] + delta[i];\n}";

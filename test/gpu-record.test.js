@@ -8,10 +8,14 @@ import { M2_COMMIT, M2_SOURCE_FILES, hashSources } from '../src/gpu/sources.js';
 const root = new URL('../', import.meta.url);
 const text = (p) => readFileSync(new URL(p, root), 'utf8');
 const json = (p) => JSON.parse(text(p));
+// The history was rewritten on 2026-10-21 (commit trailers removed; trees unchanged), so a
+// commit pinned before then is looked up in history-rewrite-2026-10-21.json.
+const rewritten = json('history-rewrite-2026-10-21.json').map;
+const current = (c) => { const k = Object.keys(rewritten).filter((o) => o.startsWith(c)); return k.length === 1 ? rewritten[k[0]] : c; };
 const sha = (s) => createHash('sha256').update(s.replace(/\r\n/g, '\n')).digest('hex');
 
-test('the milestone 1 and 1.5 records and golden cases are byte-identical to milestone 1.5 (commit 6127e48)', () => {
-  // Hashes taken from commit 6127e48. Line endings are normalised: a Windows
+test('the milestone 1 and 1.5 records and golden cases are byte-identical to milestone 1.5 (commit 96e5da3)', () => {
+  // Hashes taken from commit 96e5da3 (6127e48 before the 2026-10-21 history rewrite). Line endings are normalised: a Windows
   // checkout may carry CRLF where git stores LF.
   assert.equal(sha(text('golden/cases.json')), 'ee9b4049004a714d78ed57ea3e3166526f8054ff87295c56370ff0330b94e0d8');
   assert.equal(sha(text('golden/torch.json')), 'b77ad819e85b38feba4c35c02587c675043e821b4362c10a7f136b9e0c404efb');
@@ -25,7 +29,7 @@ test('the recorded M2 GPU results came from the sources at the M2 commit', () =>
   // milestone 3a edits some of these files, so they are read from git history.
   // CI checks out the full history for this.
   const record = json('golden/gpu-m2.json');
-  const atCommit = (f) => execFileSync('git', ['show', `${M2_COMMIT}:${f}`], { cwd: new URL('../', import.meta.url), encoding: 'utf8', maxBuffer: 64e6 });
+  const atCommit = (f) => execFileSync('git', ['show', `${current(M2_COMMIT)}:${f}`], { cwd: new URL('../', import.meta.url), encoding: 'utf8', maxBuffer: 64e6 });
   assert.equal(record.sourceHash, hashSources(M2_SOURCE_FILES.map(atCommit)));
 });
 
