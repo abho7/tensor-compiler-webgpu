@@ -26,7 +26,7 @@ So the first milestone is the reference that everything after it is checked agai
 | 2 | every op lowered to WGSL and checked on a real GPU under a float32 budget; correctness only | **done** |
 | 3a | train an MLP on the GPU, checked against PyTorch and the float64 interpreter as pre-registered | **done** |
 | 3b | train a small character-level transformer on the GPU, checked as pre-registered (DESIGN.md amendments 20 to 28) | **done** |
-| 4 | fusion and autotuning, timed against llm-inference-webgpu's hand-written kernels | not started |
+| 4 | fusion and autotuning, timed against llm-inference-webgpu's hand-written kernels | in progress: the fusion pass and fused kernels are built and their correctness is recorded on the GPU; nothing is timed yet |
 
 ## Design
 
